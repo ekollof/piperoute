@@ -1,0 +1,14 @@
+{
+  "status.connecting": "Connecting to PipeWire…",
+  "status.none": "none",
+  "status.output": "Out: %1",
+  "status.input": "In: %1",
+  "status.streams": "%1 streams",
+  "title": "PipeRoute · audio routing",
+  "section.outputs": "Output devices (click to set default)",
+  "section.inputs": "Input devices (click to set default)",
+  "section.playback": "Playback streams → output",
+  "section.capture": "Capture streams ← input",
+  "section.routeTo": "Route %1 to:",
+  "hint": "Click a device to make it the default. Click a stream, then a device, to route just that app. Left click the bar icon again to close."
+}

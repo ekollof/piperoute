@@ -1,0 +1,189 @@
+#!/usr/bin/python3
+"""PipeRoute control helper.
+
+Talks only to the already-running PipeWire session (via WirePlumber's wpctl and
+PipeWire's PulseAudio compatibility layer, pactl). No configuration, daemon or
+service of its own is installed or required.
+
+Commands (all values are PipeWire object ids / node names from PipeWire itself):
+  default <node-id>                 set the default sink or source
+  move-output <stream-id> <sink>    route a playback stream to an output
+  move-input <stream-id> <source>   route a capture stream to an input
+  status                            print a bounded JSON snapshot (diagnostics)
+
+Every command prints a single short line on stdout and exits 0 on success, or
+prints "error: <reason>" and exits 1. Inputs are validated before any command is
+built; programs are always spawned with argv, never a shell.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+WPCTL = "/usr/bin/wpctl"
+PACTL = "/usr/bin/pactl"
+
+ID_RE = re.compile(r"^[0-9]{1,10}$")
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
+MAX_LINES = 4000
+TIMEOUT = 8
+
+
+def fail(reason):
+    print("error: " + safe_text(reason))
+    return 1
+
+
+def safe_text(value):
+    """Keep helper output short, printable and free of markup/control chars."""
+    text = "".join(ch if ch.isprintable() else " " for ch in str(value))
+    return " ".join(text.split())[:240]
+
+
+def command_env():
+    """Keep the session runtime dir (needed for the PipeWire/Pulse socket) but
+    pin PATH and drop shell startup hooks. No other values are forwarded."""
+    env = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C"}
+    for key in ("XDG_RUNTIME_DIR", "PULSE_SERVER", "HOME"):
+        if key in os.environ:
+            env[key] = os.environ[key]
+    return env
+
+
+def run(argv):
+    try:
+        result = subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=TIMEOUT,
+            check=False,
+            env=command_env(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, "cannot run %s: %s" % (argv[0], exc), ""
+    out = result.stdout.decode("utf-8", "replace")[:20000]
+    err = result.stderr.decode("utf-8", "replace")[:4000]
+    if result.returncode != 0:
+        return False, safe_text(err or out or "exit %d" % result.returncode), out
+    return True, "", out
+
+
+def parse_blocks(raw, header_prefix):
+    """Split a `pactl list` dump into blocks keyed by their #index header."""
+    blocks = []
+    current = None
+    for line in raw.splitlines()[:MAX_LINES]:
+        if line.startswith(header_prefix):
+            if current is not None:
+                blocks.append(current)
+            current = {"index": line[len(header_prefix):].strip(), "lines": []}
+        elif current is not None:
+            current["lines"].append(line)
+    if current is not None:
+        blocks.append(current)
+    return blocks
+
+
+def prop(block, key):
+    for line in block["lines"]:
+        stripped = line.strip()
+        if stripped.startswith(key + " = "):
+            return stripped[len(key) + 3:].strip().strip('"')
+        if stripped.startswith(key + ": "):
+            return stripped[len(key) + 2:].strip().strip('"')
+    return ""
+
+
+def find_stream(kind, object_id):
+    """Find a pactl sink-input/source-output by its PipeWire object id."""
+    prefix = "Sink Input #" if kind == "output" else "Source Output #"
+    argv = [PACTL, "list", "sink-inputs" if kind == "output" else "source-outputs"]
+    ok, reason, out = run(argv)
+    if not ok:
+        return None, reason
+    for block in parse_blocks(out, prefix):
+        if prop(block, "object.id") == object_id:
+            return block["index"], ""
+    return None, "no %s stream for PipeWire node %s" % (kind, object_id)
+
+
+def find_endpoint(kind, name):
+    """Verify a sink/source name exists in the running PipeWire graph."""
+    argv = [PACTL, "list", "short", "sinks" if kind == "output" else "sources"]
+    ok, reason, out = run(argv)
+    if not ok:
+        return False, reason
+    for line in out.splitlines()[:MAX_LINES]:
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[1] == name:
+            return True, ""
+    return False, "no %s named %s" % (kind, name)
+
+
+def cmd_default(args):
+    if len(args) != 1 or not ID_RE.match(args[0]):
+        return fail("usage: default <node-id>")
+    ok, reason, _ = run([WPCTL, "set-default", args[0]])
+    return 0 if ok else fail(reason)
+
+
+def cmd_move(args, kind):
+    if len(args) != 2 or not ID_RE.match(args[0]) or not NAME_RE.match(args[1]):
+        return fail("usage: move-%s <stream-id> <%s-name>" % (kind, kind))
+    stream_id, target = args
+    index, reason = find_stream(kind, stream_id)
+    if index is None:
+        return fail(reason)
+    exists, reason = find_endpoint(kind, target)
+    if not exists:
+        return fail(reason)
+    verb = "move-sink-input" if kind == "output" else "move-source-output"
+    ok, reason, _ = run([PACTL, verb, index, target])
+    return 0 if ok else fail(reason)
+
+
+def cmd_status(_args):
+    """Bounded diagnostic snapshot; the widget itself reads PipeWire natively."""
+    snapshot = {}
+    for kind, listing, prefix in (
+        ("sinks", "sinks", "Sink #"),
+        ("sources", "sources", "Source #"),
+        ("playback", "sink-inputs", "Sink Input #"),
+        ("capture", "source-outputs", "Source Output #"),
+    ):
+        ok, _reason, out = run([PACTL, "list", listing])
+        items = []
+        if ok:
+            for block in parse_blocks(out, prefix):
+                items.append({
+                    "index": block["index"][:40],
+                    "nodeId": prop(block, "object.id")[:20],
+                    "name": (prop(block, "node.name") or prop(block, "Name"))[:120],
+                })
+                if len(items) >= 128:
+                    break
+        snapshot[kind] = items
+    print(json.dumps(snapshot, separators=(",", ":"))[:60000])
+    return 0
+
+
+def main():
+    if len(sys.argv) < 2:
+        return fail("missing command")
+    command, args = sys.argv[1], sys.argv[2:]
+    if command == "default":
+        return cmd_default(args)
+    if command == "move-output":
+        return cmd_move(args, "output")
+    if command == "move-input":
+        return cmd_move(args, "input")
+    if command == "status":
+        return cmd_status(args)
+    return fail("unknown command: " + command)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
