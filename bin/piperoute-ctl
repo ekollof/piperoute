@@ -1,34 +1,58 @@
 #!/usr/bin/python3
-"""PipeRoute control helper.
+"""PipeRoute control helper -- advanced PipeWire graph control.
 
-Talks only to the already-running PipeWire session (via WirePlumber's wpctl and
-PipeWire's PulseAudio compatibility layer, pactl). No configuration, daemon or
-service of its own is installed or required.
+Talks only to the already-running PipeWire session. No daemon, config or manual
+setup of its own. Reads the graph with pw-link/pw-dump and writes with pw-cli,
+pw-link, wpctl and pactl, all part of a normal PipeWire install.
 
-Commands (all values are PipeWire object ids / node names from PipeWire itself):
-  default <node-id>                 set the default sink or source
-  move-output <stream-id> <sink>    route a playback stream to an output
-  move-input <stream-id> <source>   route a capture stream to an input
-  status                            print a bounded JSON snapshot (diagnostics)
+Commands (one short line of stdout; exit 0 on success, 1 on failure):
+  graph                                JSON: ports, links, managed virtual nodes
+  connect <out-port> <in-port>         create a PipeWire link between two ports
+  disconnect <link-id>                 remove a link
+  create-node <sink|source> [label]    create a virtual node, print "ok <id> <name>"
+  destroy <node-id>                    remove a node this plugin created (pr_*)
+  default <node-id>                    set the default sink/source
+  move-output <stream-id> <sink-name>  route one playback stream to an output
+  move-input <stream-id> <source-name> route one capture stream to an input
 
-Every command prints a single short line on stdout and exits 0 on success, or
-prints "error: <reason>" and exits 1. Inputs are validated before any command is
-built; programs are always spawned with argv, never a shell.
+Every value is validated before it reaches an argv. Programs are spawned with
+argv only, never a shell; output and input sizes are bounded.
 """
 
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 
+PW_LINK = "/usr/bin/pw-link"
+PW_CLI = "/usr/bin/pw-cli"
+PW_DUMP = "/usr/bin/pw-dump"
 WPCTL = "/usr/bin/wpctl"
 PACTL = "/usr/bin/pactl"
 
 ID_RE = re.compile(r"^[0-9]{1,10}$")
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
-MAX_LINES = 4000
-TIMEOUT = 8
+# Node names we create ourselves, so destroy can never touch a device or app.
+MANAGED_RE = re.compile(r"^pr_[A-Za-z0-9_-]{1,60}$")
+LABEL_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
+# Port names may contain spaces, colons, parentheses, brackets and slashes but
+# stay printable and short. Argv is used, so this is a sanity/size bound.
+PORT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+()\[\]/ -]{0,199}$")
+
+PORT_LINE = re.compile(r"^\s*(\d+)\s+(.+?)\s*$")
+LINK_LINE = re.compile(r"^\s*(\d+)\s+\|<-\s+(\d+)\s+(.+?)\s*$")
+MAX_BYTES = 2000000
+TIMEOUT = 10
+
+
+def safe_text(value):
+    """Short, printable, markup-free text for display or error output."""
+    text = "".join(ch if ch.isprintable() else " " for ch in str(value))
+    for char in '<>&"\'':
+        text = text.replace(char, " ")
+    return " ".join(text.split())[:240]
 
 
 def fail(reason):
@@ -36,17 +60,10 @@ def fail(reason):
     return 1
 
 
-def safe_text(value):
-    """Keep helper output short, printable and free of markup/control chars."""
-    text = "".join(ch if ch.isprintable() else " " for ch in str(value))
-    return " ".join(text.split())[:240]
-
-
 def command_env():
-    """Keep the session runtime dir (needed for the PipeWire/Pulse socket) but
-    pin PATH and drop shell startup hooks. No other values are forwarded."""
+    """Keep the values needed to reach the session bus/socket; pin the rest."""
     env = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C"}
-    for key in ("XDG_RUNTIME_DIR", "PULSE_SERVER", "HOME"):
+    for key in ("XDG_RUNTIME_DIR", "PIPEWIRE_REMOTE", "PULSE_SERVER", "HOME"):
         if key in os.environ:
             env[key] = os.environ[key]
     return env
@@ -55,31 +72,163 @@ def command_env():
 def run(argv):
     try:
         result = subprocess.run(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=TIMEOUT,
-            check=False,
-            env=command_env(),
-        )
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=TIMEOUT, check=False, env=command_env())
     except (OSError, subprocess.SubprocessError) as exc:
         return False, "cannot run %s: %s" % (argv[0], exc), ""
-    out = result.stdout.decode("utf-8", "replace")[:20000]
-    err = result.stderr.decode("utf-8", "replace")[:4000]
+    out = result.stdout.decode("utf-8", "replace")[:MAX_BYTES]
+    err = result.stderr.decode("utf-8", "replace")[:MAX_BYTES]
     if result.returncode != 0:
         return False, safe_text(err or out or "exit %d" % result.returncode), out
     return True, "", out
 
 
-def parse_blocks(raw, header_prefix):
-    """Split a `pactl list` dump into blocks keyed by their #index header."""
+def dump_json():
+    ok, reason, out = run([PW_DUMP])
+    if not ok:
+        return None, reason
+    try:
+        data = json.loads(out)
+    except (ValueError, TypeError):
+        return None, "could not read PipeWire object dump"
+    return (data if isinstance(data, list) else []), ""
+
+
+def parse_ports(raw):
+    ports = []
+    for line in raw.splitlines()[:4000]:
+        match = PORT_LINE.match(line)
+        if match:
+            ports.append({"id": match.group(1), "name": safe_text(match.group(2))[:200]})
+            if len(ports) >= 256:
+                break
+    return ports
+
+
+def parse_links(raw):
+    """pw-link -l -I prints each link twice; the |<- line is the canonical one."""
+    links = []
+    seen = set()
+    lines = raw.splitlines()[:4000]
+    previous = ""
+    for line in lines:
+        match = LINK_LINE.match(line)
+        if match:
+            link_id, out_id, out_name = match.group(1), match.group(2), match.group(3)
+            upstream = PORT_LINE.match(previous)
+            if upstream and link_id not in seen:
+                links.append({
+                    "id": link_id,
+                    "outId": out_id,
+                    "out": safe_text(out_name)[:200],
+                    "inId": upstream.group(1),
+                    "in": safe_text(upstream.group(2))[:200],
+                })
+                seen.add(link_id)
+                if len(links) >= 256:
+                    break
+        previous = line
+    return links
+
+
+def cmd_graph(_args):
+    result = {"outputs": [], "inputs": [], "links": [], "nodes": []}
+    for key, args in (("outputs", ["-o", "-I"]), ("inputs", ["-i", "-I"])):
+        ok, _reason, out = run([PW_LINK] + args)
+        if ok:
+            result[key] = parse_ports(out)
+    ok, _reason, out = run([PW_LINK, "-l", "-I"])
+    if ok:
+        result["links"] = parse_links(out)
+    objects, _reason = dump_json()
+    if objects:
+        for obj in objects:
+            if obj.get("type") != "PipeWire:Interface:Node":
+                continue
+            props = (obj.get("info") or {}).get("props") or {}
+            name = str(props.get("node.name") or "")
+            if MANAGED_RE.match(name):
+                result["nodes"].append({
+                    "id": str(obj.get("id", "")),
+                    "name": name,
+                    "class": str(props.get("media.class") or ""),
+                    "description": safe_text(props.get("node.description") or name)[:120],
+                })
+            if len(result["nodes"]) >= 64:
+                break
+    print(json.dumps(result, separators=(",", ":"))[:60000])
+    return 0
+
+
+def cmd_connect(args):
+    if len(args) != 2 or not all(PORT_RE.match(a) for a in args):
+        return fail("usage: connect <output-port> <input-port>")
+    ok, reason, _ = run([PW_LINK, args[0], args[1]])
+    return 0 if ok else fail(reason)
+
+
+def cmd_disconnect(args):
+    if len(args) != 1 or not ID_RE.match(args[0]):
+        return fail("usage: disconnect <link-id>")
+    ok, reason, _ = run([PW_LINK, "-d", args[0]])
+    return 0 if ok else fail(reason)
+
+
+def cmd_create_node(args):
+    if not args or args[0] not in ("sink", "source"):
+        return fail("usage: create-node <sink|source> [label]")
+    label = "node"
+    if len(args) > 1:
+        if not LABEL_RE.match(args[1]):
+            return fail("invalid label")
+        label = args[1]
+    name = "pr_" + label + "_" + secrets.token_hex(2)
+    media_class = "Audio/Sink" if args[0] == "sink" else "Audio/Source"
+    props = ("{ factory.name=support.null-audio-sink node.name=%s "
+             "node.description=%s media.class=%s object.linger=true "
+             "audio.position=[FL FR] }" % (name, name, media_class))
+    ok, reason, _ = run([PW_CLI, "create-node", "adapter", props])
+    if not ok:
+        return fail(reason)
+    objects, _ = dump_json()
+    if objects:
+        for obj in objects:
+            props2 = (obj.get("info") or {}).get("props") or {}
+            if str(props2.get("node.name") or "") == name:
+                print("ok %s %s" % (obj.get("id", "?"), name))
+                return 0
+    return fail("node created but not found in graph")
+
+
+def cmd_destroy(args):
+    if len(args) != 1 or not ID_RE.match(args[0]):
+        return fail("usage: destroy <node-id>")
+    objects, reason = dump_json()
+    if objects is None:
+        return fail(reason)
+    target = None
+    for obj in objects:
+        if str(obj.get("id")) == args[0]:
+            target = obj
+            break
+    if not target:
+        return fail("node not found")
+    props = (target.get("info") or {}).get("props") or {}
+    name = str(props.get("node.name") or "")
+    if not MANAGED_RE.match(name):
+        return fail("refusing to remove a node this plugin did not create")
+    ok, reason, _ = run([PW_CLI, "destroy", args[0]])
+    return 0 if ok else fail(reason)
+
+
+def pactl_blocks(raw, prefix):
     blocks = []
     current = None
-    for line in raw.splitlines()[:MAX_LINES]:
-        if line.startswith(header_prefix):
+    for line in raw.splitlines()[:4000]:
+        if line.startswith(prefix):
             if current is not None:
                 blocks.append(current)
-            current = {"index": line[len(header_prefix):].strip(), "lines": []}
+            current = {"index": line[len(prefix):].strip(), "lines": []}
         elif current is not None:
             current["lines"].append(line)
     if current is not None:
@@ -87,36 +236,31 @@ def parse_blocks(raw, header_prefix):
     return blocks
 
 
-def prop(block, key):
+def block_prop(block, key):
     for line in block["lines"]:
-        stripped = line.strip()
-        if stripped.startswith(key + " = "):
-            return stripped[len(key) + 3:].strip().strip('"')
-        if stripped.startswith(key + ": "):
-            return stripped[len(key) + 2:].strip().strip('"')
+        line = line.strip()
+        if line.startswith(key + " = "):
+            return line[len(key) + 3:].strip().strip('"')
     return ""
 
 
 def find_stream(kind, object_id):
-    """Find a pactl sink-input/source-output by its PipeWire object id."""
+    listing = "sink-inputs" if kind == "output" else "source-outputs"
     prefix = "Sink Input #" if kind == "output" else "Source Output #"
-    argv = [PACTL, "list", "sink-inputs" if kind == "output" else "source-outputs"]
-    ok, reason, out = run(argv)
+    ok, reason, out = run([PACTL, "list", listing])
     if not ok:
         return None, reason
-    for block in parse_blocks(out, prefix):
-        if prop(block, "object.id") == object_id:
+    for block in pactl_blocks(out, prefix):
+        if block_prop(block, "object.id") == object_id:
             return block["index"], ""
     return None, "no %s stream for PipeWire node %s" % (kind, object_id)
 
 
-def find_endpoint(kind, name):
-    """Verify a sink/source name exists in the running PipeWire graph."""
-    argv = [PACTL, "list", "short", "sinks" if kind == "output" else "sources"]
-    ok, reason, out = run(argv)
+def endpoint_exists(kind, name):
+    ok, reason, out = run([PACTL, "list", "short", "sinks" if kind == "output" else "sources"])
     if not ok:
         return False, reason
-    for line in out.splitlines()[:MAX_LINES]:
+    for line in out.splitlines()[:4000]:
         parts = line.split("\t")
         if len(parts) >= 2 and parts[1] == name:
             return True, ""
@@ -127,62 +271,43 @@ def cmd_default(args):
     if len(args) != 1 or not ID_RE.match(args[0]):
         return fail("usage: default <node-id>")
     ok, reason, _ = run([WPCTL, "set-default", args[0]])
+    print("ok" if ok else "")
     return 0 if ok else fail(reason)
 
 
 def cmd_move(args, kind):
-    if len(args) != 2 or not ID_RE.match(args[0]) or not NAME_RE.match(args[1]):
+    if len(args) != 2 or not ID_RE.match(args[0]) or not ENDPOINT_RE.match(args[1]):
         return fail("usage: move-%s <stream-id> <%s-name>" % (kind, kind))
-    stream_id, target = args
-    index, reason = find_stream(kind, stream_id)
+    index, reason = find_stream(kind, args[0])
     if index is None:
         return fail(reason)
-    exists, reason = find_endpoint(kind, target)
+    exists, reason = endpoint_exists(kind, args[1])
     if not exists:
         return fail(reason)
     verb = "move-sink-input" if kind == "output" else "move-source-output"
-    ok, reason, _ = run([PACTL, verb, index, target])
+    ok, reason, _ = run([PACTL, verb, index, args[1]])
+    print("ok" if ok else "")
     return 0 if ok else fail(reason)
-
-
-def cmd_status(_args):
-    """Bounded diagnostic snapshot; the widget itself reads PipeWire natively."""
-    snapshot = {}
-    for kind, listing, prefix in (
-        ("sinks", "sinks", "Sink #"),
-        ("sources", "sources", "Source #"),
-        ("playback", "sink-inputs", "Sink Input #"),
-        ("capture", "source-outputs", "Source Output #"),
-    ):
-        ok, _reason, out = run([PACTL, "list", listing])
-        items = []
-        if ok:
-            for block in parse_blocks(out, prefix):
-                items.append({
-                    "index": block["index"][:40],
-                    "nodeId": prop(block, "object.id")[:20],
-                    "name": (prop(block, "node.name") or prop(block, "Name"))[:120],
-                })
-                if len(items) >= 128:
-                    break
-        snapshot[kind] = items
-    print(json.dumps(snapshot, separators=(",", ":"))[:60000])
-    return 0
 
 
 def main():
     if len(sys.argv) < 2:
         return fail("missing command")
     command, args = sys.argv[1], sys.argv[2:]
-    if command == "default":
-        return cmd_default(args)
-    if command == "move-output":
-        return cmd_move(args, "output")
-    if command == "move-input":
-        return cmd_move(args, "input")
-    if command == "status":
-        return cmd_status(args)
-    return fail("unknown command: " + command)
+    handlers = {
+        "graph": cmd_graph,
+        "connect": cmd_connect,
+        "disconnect": cmd_disconnect,
+        "create-node": cmd_create_node,
+        "destroy": cmd_destroy,
+        "default": cmd_default,
+        "move-output": lambda a: cmd_move(a, "output"),
+        "move-input": lambda a: cmd_move(a, "input"),
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        return fail("unknown command: " + command)
+    return handler(args)
 
 
 if __name__ == "__main__":

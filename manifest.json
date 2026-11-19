@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.piperoute",
   "name": "PipeRoute",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Emiel Kollof",
   "license": "MIT",
-  "description": "Display and configure PipeWire audio routing: default devices and per-app stream routing, straight from the running PipeWire graph.",
+  "description": "Advanced PipeWire audio routing: patch arbitrary ports, create virtual sinks/sources, and route streams, straight from the running graph.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "PipeRoute",
-    "description": "Configure PipeWire output/input defaults and per-app audio routing",
+    "description": "Patch ports, create virtual devices, and route audio streams in PipeWire",
     "category": "Audio",
     "allowMultiple": false,
     "defaultSection": "right",

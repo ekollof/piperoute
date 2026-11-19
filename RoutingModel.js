@@ -38,7 +38,13 @@ function safeToken(value) {
 function nodeKind(node) {
   if (!node) return "unknown"
   if (node.isStream) return node.isSink ? "playback" : "capture"
-  return node.isSink ? "sink" : "source"
+  if (node.isSink) return "sink"
+  // Quickshell marks typed audio sources with `audio`; untyped/virtual ones
+  // can still be recognised by their media class. MIDI and video are excluded.
+  if (node.audio) return "source"
+  var mediaClass = String(node.type || "")
+  if (mediaClass.indexOf("Audio/Source") !== -1) return "source"
+  return "other"
 }
 
 function row(node) {
