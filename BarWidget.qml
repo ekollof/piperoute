@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import Quickshell.Services.Pipewire
 import qs.Commons
 import qs.Commons as Commons
@@ -205,15 +204,6 @@ BarWidget {
   }
 
   function close() { popupOpen = false }
-
-  // Lets a keybinding or a script open the routing panel:
-  //   qs ipc call io.github.ekollof.piperoute toggle
-  IpcHandler {
-    target: "io.github.ekollof.piperoute"
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function toggle(): void { root.popupOpen ? root.close() : root.open() }
-  }
 
   Run {
     id: ctl

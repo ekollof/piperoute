@@ -72,12 +72,6 @@ To put it on the bar:
 omarchy bar put io.github.ekollof.piperoute --section right
 ```
 
-It can also be opened from a keybinding or a script:
-
-```bash
-qs ipc call io.github.ekollof.piperoute toggle
-```
-
 ## Validation and tests
 
 ```bash
