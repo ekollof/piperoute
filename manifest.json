@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ekollof.piperoute",
+  "name": "PipeRoute",
+  "version": "0.1.0",
+  "author": "Emiel Kollof",
+  "license": "MIT",
+  "description": "Display and configure PipeWire audio routing: default devices and per-app stream routing, straight from the running PipeWire graph.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "PipeRoute",
+    "description": "Configure PipeWire output/input defaults and per-app audio routing",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}
