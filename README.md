@@ -7,6 +7,8 @@ Carla. It shows the live PipeWire graph as boxes and cables on a full-screen
 canvas and lets you edit it by dragging. No daemon, config file or manual setup
 of its own.
 
+![PipeRoute patchbay](preview.png)
+
 Kinds: `bar-widget`
 
 ## What it does
@@ -17,6 +19,10 @@ Its tooltip summarises default output, default input and stream count.
 for defaults, stream routing and virtual devices.
 
 ### Graphical patchbay (left click)
+
+![PipeRoute in the bar](screenshots/bar-widget.png)
+
+![Full patchbay canvas](screenshots/patchbay.png)
 
 A full-screen canvas on the monitor you clicked, with:
 

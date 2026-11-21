@@ -37,8 +37,11 @@ PanelWindow {
   readonly property color boxBorder: Commons.Color.popups.border
   readonly property color cable: Commons.Color.accent
   readonly property color errorColor: Commons.Color.urgent
-  // Near-opaque by default so the tool reads cleanly over any wallpaper.
-  property real scrimOpacity: 0.96
+  // Translucent so the wallpaper stays part of the composition. The theme
+  // background is the scrim colour and the theme foreground stays readable at
+  // this opacity; raise scrimOpacity toward 1.0 for maximum contrast.
+  property real scrimOpacity: 0.80
+  property real nodeOpacity: 0.90
 
   readonly property int nodeWidth: 248
   readonly property int headerHeight: 30
@@ -380,7 +383,7 @@ PanelWindow {
             height: win.nodeHeight(modelData)
             radius: 10
             clip: true
-            color: win.boxFill
+            color: Util.alpha(win.boxFill, win.nodeOpacity)
             border.color: modelData.kind === "stream"
               ? Util.alpha(Commons.Color.accent, 0.55)
               : modelData.kind === "virtual"
@@ -415,7 +418,7 @@ PanelWindow {
                   width: 10; height: 10; radius: 5
                   anchors.verticalCenter: parent.verticalCenter
                   color: win.cable
-                  border.color: win.boxFill
+                  border.color: Util.alpha(win.boxFill, win.nodeOpacity)
                   border.width: 1
                   x: -12
                 }
@@ -459,7 +462,7 @@ PanelWindow {
                 y: win.portTop + index * win.portStep + win.portStep / 2 - 5
                 width: 10; height: 10; radius: 5
                 color: win.cable
-                border.color: win.boxFill
+                border.color: Util.alpha(win.boxFill, win.nodeOpacity)
                 border.width: 1
               }
             }
@@ -477,7 +480,7 @@ PanelWindow {
             z: 3
             Rectangle {
               width: 18; height: 18; radius: 9
-              color: win.boxFill
+              color: Util.alpha(win.boxFill, win.nodeOpacity)
               border.color: win.cable
               border.width: 1
               Text {
