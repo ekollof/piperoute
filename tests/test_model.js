@@ -41,4 +41,10 @@ assert.equal(M.routeOf(links, 112, 'capture').id, 76)
 assert.equal(M.routeOf(links, 111, 'capture'), null, 'direction matters')
 assert.equal(M.nodeById(nodes, 76).name, 'alsa_input.usb-UMC')
 
+// Initial canvas placement follows signal flow, by port topology.
+assert.equal(M.layoutColumn({ inputs: [], outputs: [{ id: '1' }] }), 0, 'producers left')
+assert.equal(M.layoutColumn({ inputs: [{ id: '1' }], outputs: [{ id: '2' }] }), 1, 'processing middle')
+assert.equal(M.layoutColumn({ inputs: [{ id: '1' }], outputs: [] }), 2, 'consumers right')
+assert.equal(M.layoutColumn({ inputs: [], outputs: [] }), 1, 'portless middle')
+
 console.log('model tests passed')

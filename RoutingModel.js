@@ -99,6 +99,23 @@ function routeOf(linkGroups, streamId, direction) {
   return null
 }
 
+/**
+ * Initial canvas column for a node, by port topology rather than by its kind:
+ *   0 = outputs only   (producers: playback streams, source devices)
+ *   1 = inputs+outputs (processing: sinks with monitor ports, virtual devices)
+ *   2 = inputs only    (consumers: capture streams, sink playback ports)
+ * A node with no ports has nothing to patch, so it joins the middle.
+ * This only decides first placement; a node the user moved is never moved back.
+ */
+function layoutColumn(node) {
+  var hasInputs = !!(node && node.inputs && node.inputs.length)
+  var hasOutputs = !!(node && node.outputs && node.outputs.length)
+  if (hasOutputs && !hasInputs) return 0
+  if (hasInputs && hasOutputs) return 1
+  if (hasInputs && !hasOutputs) return 2
+  return 1
+}
+
 function glyph(kind) {
   if (kind === "sink" || kind === "playback") return "󰓃" // volume / speaker
   if (kind === "source" || kind === "capture") return "󰍬" // microphone
@@ -114,6 +131,7 @@ function findRow(list, id) {
 if (typeof module !== "undefined") {
   module.exports = {
     safeLabel: safeLabel, safeToken: safeToken, nodeKind: nodeKind, row: row,
-    rows: rows, nodeById: nodeById, routeOf: routeOf, glyph: glyph, findRow: findRow
+    rows: rows, nodeById: nodeById, routeOf: routeOf, layoutColumn: layoutColumn,
+    glyph: glyph, findRow: findRow
   }
 }
