@@ -2,9 +2,10 @@
 
 [![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
 
-An **advanced PipeWire audio routing** bar widget. It is a patchbay and virtual
-device manager, not just an output picker: it reads and edits the live PipeWire
-graph with no daemon, config file or manual setup of its own.
+A **graphical PipeWire patchbay** bar widget, in the spirit of qpwgraph and
+Carla. It shows the live PipeWire graph as boxes and cables on a full-screen
+canvas and lets you edit it by dragging. No daemon, config file or manual setup
+of its own.
 
 Kinds: `bar-widget`
 
@@ -12,55 +13,59 @@ Kinds: `bar-widget`
 
 The bar button shows the routing glyph `󰌘` and the current default output.
 Its tooltip summarises default output, default input and stream count.
-Left-click opens the routing card with three tabs:
+**Left click opens the graphical patchbay; right click opens a compact menu**
+for defaults, stream routing and virtual devices.
 
-### Patch
+### Graphical patchbay (left click)
 
-- **Active links** — every PipeWire link currently in the graph, with an
-  `×` button to remove any link.
-- **Step 1 / Step 2** — pick any *output port* (an app's playback stream, a
-  device's monitor, a virtual source capture port …), then any *input port*
-  (a device's playback port, a stream's capture port …) to create a link
-  between exactly those two ports. This is the same operation a desktop
-  patchbay such as qpwgraph or Helvum performs.
+A full-screen canvas on the monitor you clicked, with:
 
-### Virtual
+- **Nodes** — one box per audio node. Playback streams are on the left, virtual
+  devices in the middle, hardware devices on the right. Each box lists its
+  input ports on the left edge and output ports on the right edge.
+- **Cables** — bezier curves drawn between the ports that are actually linked
+  in PipeWire. They follow the nodes when you move them.
+- **Drag an output port onto an input port** to create a link. A dashed cable
+  follows the cursor while you drag, and the bottom edge names the port under
+  the cursor.
+- **Drag a node by its title bar** to rearrange the canvas.
+- **Click the × at a cable's midpoint** to remove that link.
+- **Toolbar** — Refresh, `+ Virtual output`, `+ Virtual input`, Close. `R`
+  refreshes, `Esc` closes. The canvas also refreshes automatically every few
+  seconds while open.
 
-- **+ Virtual output** creates a `support.null-audio-sink` output that apps can
-  use as a destination, which you can then patch onward in the Patch tab.
-- **+ Virtual input** creates a virtual `Audio/Source` that other apps can
-  record from.
-- Created devices are listed under **Virtual devices** with a remove button.
-  Only nodes whose names start with `pr_` (created by this plugin) can be
-  removed through the UI — hardware and application nodes are protected.
+Only audio nodes are shown; MIDI bridges and webcam video nodes stay out of
+the way.
 
-### Devices
+### Compact menu (right click)
 
-- Set the **default output** and **default input** with a click.
-- Route individual **playback / capture streams** to a chosen device.
+- Create/remove virtual outputs and inputs.
+- Set the default output and input.
+- Route individual playback/capture streams to a chosen device.
+- A shortcut button to open the graphical patchbay.
 
 ## How it interfaces with PipeWire
 
-- Bar status and the Devices tab use Quickshell's native
+- Bar status and the compact menu use Quickshell's native
   `Quickshell.Services.Pipewire` module: `Pipewire.nodes`, `linkGroups`,
-  `defaultAudioSink`/`defaultAudioSource`. This is event-driven; no polling
-  process runs while the card is closed.
-- Patchbay and virtual devices use the installed PipeWire tools through a
-  narrow, validated helper (`bin/piperoute-ctl`): `pw-link` to list/connect/
-  disconnect ports, `pw-cli` to create/destroy virtual nodes, `wpctl` for
-  defaults and `pactl` for moving streams. The graph is refreshed on open,
-  after every action, and every few seconds while the card is open.
+  `defaultAudioSink`/`defaultAudioSource`. Event-driven; no polling while
+  closed.
+- The canvas reads `pw-dump` for structured nodes, ports and links (including
+  the exact port names and link ids), and writes with the installed PipeWire
+  tools: `pw-link` to connect/disconnect ports, `pw-cli` to create/destroy
+  virtual nodes, `wpctl` for defaults and `pactl` for moving streams.
 - Every external value is validated, commands are spawned from argv (never a
-  shell), and output is bounded. Node-derived text is sanitised before it is
-  shown (`Text.PlainText` everywhere).
+  shell), and output is bounded. Node-derived text is sanitised before display
+  (`Text.PlainText` everywhere). Live `PwNode` objects are never held by a
+  visual delegate — only primitive snapshots — so graph teardowns cannot crash
+  the shell.
 
-All of these tools ship with a normal PipeWire/WirePlumber install — nothing is
-installed or configured by the plugin.
+All of these tools ship with a normal PipeWire/WirePlumber install.
 
 ## Requirements
 
 - Omarchy 4 with the Quattro shell and plugin support.
-- A running PipeWire session with WirePlumber, `pw-link`, `pw-cli`, `pw-dump`,
+- A running PipeWire session with WirePlumber, `pw-dump`, `pw-link`, `pw-cli`,
   `wpctl` and `pactl` on `PATH` (the standard Omarchy setup).
 
 ## Installation
@@ -81,8 +86,8 @@ omarchy agent look plugin .
 ```
 
 `tests/test_model.js` covers markup-shaped node names, node classification and
-routing direction; `tests/test_ctl.py` covers input validation and bounded
-parsing of `pw-link`/`pactl` output.
+routing direction; `tests/test_ctl.py` covers input validation and the
+structured graph builder that feeds the canvas.
 
 ## Removal
 
@@ -91,7 +96,8 @@ omarchy plugin remove io.github.ekollof.piperoute
 ```
 
 The plugin keeps no state of its own. Virtual devices it created remain in the
-PipeWire graph until removed (in the Virtual tab or with `pw-cli destroy`).
+PipeWire graph until removed (with the canvas toolbar, the compact menu, or
+`pw-cli destroy`).
 
 ## Security
 

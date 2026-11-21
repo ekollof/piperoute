@@ -41,8 +41,6 @@ ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
 # stay printable and short. Argv is used, so this is a sanity/size bound.
 PORT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+()\[\]/ -]{0,199}$")
 
-PORT_LINE = re.compile(r"^\s*(\d+)\s+(.+?)\s*$")
-LINK_LINE = re.compile(r"^\s*(\d+)\s+\|<-\s+(\d+)\s+(.+?)\s*$")
 MAX_BYTES = 2000000
 TIMEOUT = 10
 
@@ -94,68 +92,112 @@ def dump_json():
     return (data if isinstance(data, list) else []), ""
 
 
-def parse_ports(raw):
-    ports = []
-    for line in raw.splitlines()[:4000]:
-        match = PORT_LINE.match(line)
-        if match:
-            ports.append({"id": match.group(1), "name": safe_text(match.group(2))[:200]})
-            if len(ports) >= 256:
-                break
-    return ports
+def build_graph(objects):
+    """Shape pw-dump objects into a graph the QML canvas can lay out.
 
+    Ports are keyed by their pw-dump id, and their `name` is the exact
+    <node.name>:<port.name> string pw-link expects, so no later translation is
+    needed between what the canvas shows and what a click connects.
+    """
+    node_map = {}
+    port_map = {}
+    managed = []
 
-def parse_links(raw):
-    """pw-link -l -I prints each link twice; the |<- line is the canonical one."""
-    links = []
-    seen = set()
-    lines = raw.splitlines()[:4000]
-    previous = ""
-    for line in lines:
-        match = LINK_LINE.match(line)
-        if match:
-            link_id, out_id, out_name = match.group(1), match.group(2), match.group(3)
-            upstream = PORT_LINE.match(previous)
-            if upstream and link_id not in seen:
-                links.append({
-                    "id": link_id,
-                    "outId": out_id,
-                    "out": safe_text(out_name)[:200],
-                    "inId": upstream.group(1),
-                    "in": safe_text(upstream.group(2))[:200],
+    for obj in objects:
+        otype = obj.get("type")
+        info = obj.get("info") or {}
+        props = info.get("props") or {}
+        oid = obj.get("id")
+
+        if otype == "PipeWire:Interface:Node":
+            name = str(props.get("node.name") or "")
+            media_class = str(props.get("media.class") or "")
+            desc = str(props.get("node.description") or props.get("node.nick") or name)
+            node_map[str(oid)] = {
+                "id": str(oid),
+                "name": name,
+                "label": safe_text(desc)[:100] or name or ("node " + str(oid)),
+                "class": media_class,
+                "kind": ("virtual" if MANAGED_RE.match(name)
+                         else "stream" if media_class.startswith("Stream/")
+                         else "device" if media_class else "other"),
+                "outputs": [],
+                "inputs": [],
+            }
+            if MANAGED_RE.match(name):
+                managed.append({
+                    "id": str(oid),
+                    "name": name,
+                    "class": media_class,
+                    "description": safe_text(desc)[:100],
                 })
-                seen.add(link_id)
-                if len(links) >= 256:
-                    break
-        previous = line
-    return links
+
+        elif otype == "PipeWire:Interface:Port":
+            node_id = str(props.get("node.id", ""))
+            direction = str(props.get("port.direction") or "")
+            port_name = str(props.get("port.name") or "")
+            node_name = str(props.get("node.name") or "")
+            # Fall back to the node we registered above when the port itself
+            # does not carry node.name (PipeWire versions differ).
+            if not node_name and node_id in node_map:
+                node_name = node_map[node_id]["name"]
+            if not node_name or not port_name or direction not in ("in", "out"):
+                continue
+            full = (node_name + ":" + port_name)[:200]
+            port_map[str(oid)] = {
+                "id": str(oid),
+                "node": node_id,
+                "name": full,
+                "label": safe_text(port_name)[:80],
+                "direction": direction,
+            }
+
+    links = []
+    for obj in objects:
+        if obj.get("type") != "PipeWire:Interface:Link":
+            continue
+        props = (obj.get("info") or {}).get("props") or {}
+        out_port = str(props.get("link.output.port", ""))
+        in_port = str(props.get("link.input.port", ""))
+        if out_port in port_map and in_port in port_map:
+            links.append({
+                "id": str(obj.get("id", "")),
+                "out": out_port,
+                "in": in_port,
+            })
+        if len(links) >= 128:
+            break
+
+    # Only audio nodes with at least one port are interesting to a patchbay;
+    # MIDI bridges and v4l2 devices would otherwise crowd the canvas.
+    nodes = []
+    for node in node_map.values():
+        for port in port_map.values():
+            if port["node"] != node["id"]:
+                continue
+            if "Audio" not in node["class"]:
+                continue
+            target = node["outputs"] if port["direction"] == "out" else node["inputs"]
+            target.append({k: port[k] for k in ("id", "name", "label")})
+        if node["outputs"] or node["inputs"]:
+            for key in ("outputs", "inputs"):
+                node[key] = node[key][:32]
+            nodes.append(node)
+        if len(nodes) >= 64:
+            break
+
+    return {
+        "nodes": nodes,
+        "links": links,
+        "managed": managed[:64],
+    }
 
 
 def cmd_graph(_args):
-    result = {"outputs": [], "inputs": [], "links": [], "nodes": []}
-    for key, args in (("outputs", ["-o", "-I"]), ("inputs", ["-i", "-I"])):
-        ok, _reason, out = run([PW_LINK] + args)
-        if ok:
-            result[key] = parse_ports(out)
-    ok, _reason, out = run([PW_LINK, "-l", "-I"])
-    if ok:
-        result["links"] = parse_links(out)
-    objects, _reason = dump_json()
-    if objects:
-        for obj in objects:
-            if obj.get("type") != "PipeWire:Interface:Node":
-                continue
-            props = (obj.get("info") or {}).get("props") or {}
-            name = str(props.get("node.name") or "")
-            if MANAGED_RE.match(name):
-                result["nodes"].append({
-                    "id": str(obj.get("id", "")),
-                    "name": name,
-                    "class": str(props.get("media.class") or ""),
-                    "description": safe_text(props.get("node.description") or name)[:120],
-                })
-            if len(result["nodes"]) >= 64:
-                break
+    objects, reason = dump_json()
+    if objects is None:
+        return fail(reason)
+    result = build_graph(objects)
     print(json.dumps(result, separators=(",", ":"))[:60000])
     return 0
 
