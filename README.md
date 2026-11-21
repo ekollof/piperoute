@@ -87,7 +87,7 @@ The plugin talks to the PipeWire session that is already running.
 ## Installation
 
 ```bash
-omarchy plugin add https://github.com/ekollof/io.github.ekollof.piperoute.git --enable
+omarchy plugin add https://github.com/ekollof/piperoute.git --enable
 ```
 
 `omarchy plugin install` is an alias for the same command. The plugin is
