@@ -90,6 +90,7 @@ BarWidget {
   function runCtl(action, args) {
     if (ctl.running) return
     pendingAction = action
+    if (action === "graph") root.lastGraphRefreshMs = Date.now()
     statusText = strings.t("busy")
     errorText = ""
     ctl.command = [helperPath, action].concat(args)
@@ -98,10 +99,18 @@ BarWidget {
 
   function refreshGraph() { runCtl("graph", []) }
 
+  readonly property bool graphBusy: graphLoader.item ? graphLoader.item.dragging : false
+  property double lastGraphRefreshMs: 0
+
   // Topology changes arrive as native Pipewire events. Debounce them so a
-  // burst of node/link changes causes one graph read, not one per signal.
+  // burst of node/link changes causes one graph read, not one per signal, and
+  // keep automatic reads to at most one per second. A refresh mid-drag would
+  // replace the node the pointer is holding.
   function scheduleGraphRefresh() {
-    if (root.graphOpen) graphDebounce.restart()
+    if (!(root.graphOpen || root.popupOpen) || root.graphBusy) return
+    var wait = Math.max(200, 1000 - (Date.now() - root.lastGraphRefreshMs))
+    graphDebounce.interval = wait
+    graphDebounce.restart()
   }
 
   function takeGraph(text) {
@@ -112,30 +121,51 @@ BarWidget {
       errorText = strings.t("badGraph")
       return
     }
+    var managed = []
+    if (Array.isArray(data.managed)) {
+      for (var i = 0; i < data.managed.length && managed.length < 64; i++) {
+        var m = data.managed[i]
+        if (!m || typeof m !== "object") continue
+        managed.push({
+          id: String(m.id || "").slice(0, 20),
+          description: Model.safeLabel(m.description || m.name, 100),
+          "class": Model.safeLabel(m["class"], 60)
+        })
+      }
+    }
     graph = {
       nodes: data.nodes.slice(0, 64),
       links: data.links.slice(0, 128),
-      managed: Array.isArray(data.managed) ? data.managed.slice(0, 64) : []
+      managed: managed
     }
     if (graphLoader.item) graphLoader.item.applyGraph(graph)
   }
 
   function finish(result) {
+    var action = pendingAction
     if (result.state !== "ok") {
       var detail = String(result.reason || result.stdout || "").slice(0, 200)
       errorText = result.state + (detail ? ": " + detail : "")
       statusText = strings.t("ready")
       return
     }
-    if (pendingAction === "graph") {
+    if (action === "graph") {
+      root.lastGraphRefreshMs = Date.now()
       takeGraph(String(result.stdout || ""))
-    } else if (pendingAction === "create-node") {
+      // takeGraph leaves errorText set when the payload was unusable.
+      if (errorText === "") statusText = strings.t("ready")
+      return
+    }
+    if (action === "create-node") {
       var parts = String(result.stdout || "").trim().split(/\s+/)
       statusText = parts.length >= 3
         ? strings.t("created").arg(parts[2]) : strings.t("createdGeneric")
+    } else {
+      statusText = strings.t("ready")
     }
-    if (pendingAction !== "graph") refreshGraph()
     errorText = ""
+    // Re-read so the managed list and canvas show the new topology at once.
+    if (root.popupOpen || root.graphOpen) scheduleGraphRefresh()
   }
 
   function setDefaultSink(row) {
@@ -179,6 +209,11 @@ BarWidget {
     id: ctl
     command: []
     deadlineMs: 12000
+    // pw-dump on a busy graph is larger than the block's 64 KiB default, and
+    // a truncated JSON document would make the canvas fail to parse. The
+    // helper also caps what it emits (MAX_GRAPH_BYTES).
+    maxBytes: 8388608
+    keepBytes: 1048576
     onFinished: result => root.finish(result)
   }
 
@@ -195,7 +230,10 @@ BarWidget {
     id: graphDebounce
     interval: 200
     repeat: false
-    onTriggered: if (root.graphOpen && !ctl.running) root.refreshGraph()
+    onTriggered: {
+      if ((root.graphOpen || root.popupOpen) && !ctl.running && !root.graphBusy)
+        root.refreshGraph()
+    }
   }
 
   // Safety net for changes the native PipeWire model does not signal (for
@@ -212,7 +250,7 @@ BarWidget {
     id: graphLoader
     source: Qt.resolvedUrl("GraphCanvas.qml")
     onLoaded: {
-      item.screen = root.QsWindow.window ? root.QsWindow.window.screen : null
+      item.screen = Qt.binding(function() { return root.QsWindow.window ? root.QsWindow.window.screen : null })
       item.opened = Qt.binding(function() { return root.graphOpen })
       item.statusText = Qt.binding(function() { return root.statusText })
       item.errorText = Qt.binding(function() { return root.errorText })
@@ -225,7 +263,6 @@ BarWidget {
       function onActionRequested(action, args) { root.runCtl(action, args) }
     }
   }
-  readonly property var graphWindow: graphLoader.item
 
   WidgetButton {
     id: button
@@ -239,6 +276,7 @@ BarWidget {
         root.graphOpen = false
         root.errorText = ""
         root.popupOpen = !root.popupOpen
+        if (root.popupOpen) root.refreshGraph()
       }
     }
   }

@@ -29,6 +29,8 @@ A full-screen canvas on the monitor you clicked, with:
   follows the cursor while you drag, and the bottom edge names the port under
   the cursor.
 - **Drag a node by its title bar** to rearrange the canvas.
+- **Pan** by dragging empty canvas, by scrolling (Shift for horizontal), or
+  with the arrow keys.
 - **Click the × at a cable's midpoint** to remove that link.
 - **Toolbar** — Refresh, `+ Virtual output`, `+ Virtual input`, Close. `R`
   refreshes, `Esc` closes.

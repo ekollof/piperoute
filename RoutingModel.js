@@ -21,8 +21,10 @@ function safeLabel(value, maxLen) {
     var code = text.charCodeAt(i)
     var allowed = (code >= 32 && code < 127) || code > 159
     if (!allowed) { out += " "; continue }
-    // Markup-shaped input must never reach a tooltip or Text sink.
-    if (ch === "<" || ch === ">" || ch === "&" || ch === '"' || ch === "'") out += " "
+    // Markup-shaped input must never reach a tooltip or Text sink. Quotes and
+    // apostrophes stay: they cannot form markup without <, > or &, and they
+    // are common in real device names.
+    if (ch === "<" || ch === ">" || ch === "&") out += " "
     else out += ch
   }
   return out.replace(/\s+/g, " ").trim().slice(0, limit)

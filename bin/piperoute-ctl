@@ -41,14 +41,23 @@ ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
 # stay printable and short. Argv is used, so this is a sanity/size bound.
 PORT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+()\[\]/ -]{0,199}$")
 
-MAX_BYTES = 2000000
+MAX_PORTS = 2048
+MAX_NODES = 48
+MAX_PORTS_PER_KIND = 20
+MAX_LINKS = 128
+MAX_GRAPH_BYTES = 900000
+MAX_BYTES = 8000000
 TIMEOUT = 10
 
 
 def safe_text(value):
-    """Short, printable, markup-free text for display or error output."""
+    """Short, printable, markup-free text for display or error output.
+
+    Quotes and apostrophes are kept: they are common in device names and
+    cannot form markup without '<', '>' or '&', which are removed.
+    """
     text = "".join(ch if ch.isprintable() else " " for ch in str(value))
-    for char in '<>&"\'':
+    for char in "<>&":
         text = text.replace(char, " ")
     return " ".join(text.split())[:240]
 
@@ -101,6 +110,7 @@ def build_graph(objects):
     """
     node_map = {}
     port_map = {}
+    ports_by_node = {}
     managed = []
 
     for obj in objects:
@@ -110,11 +120,13 @@ def build_graph(objects):
         oid = obj.get("id")
 
         if otype == "PipeWire:Interface:Node":
-            name = str(props.get("node.name") or "")
-            media_class = str(props.get("media.class") or "")
+            if len(node_map) >= MAX_NODES:
+                continue
+            name = str(props.get("node.name") or "")[:200]
+            media_class = str(props.get("media.class") or "")[:60]
             desc = str(props.get("node.description") or props.get("node.nick") or name)
             node_map[str(oid)] = {
-                "id": str(oid),
+                "id": str(oid)[:20],
                 "name": name,
                 "label": safe_text(desc)[:100] or name or ("node " + str(oid)),
                 "class": media_class,
@@ -124,33 +136,35 @@ def build_graph(objects):
                 "outputs": [],
                 "inputs": [],
             }
-            if MANAGED_RE.match(name):
+            if MANAGED_RE.match(name) and len(managed) < MAX_NODES:
                 managed.append({
-                    "id": str(oid),
+                    "id": str(oid)[:20],
                     "name": name,
                     "class": media_class,
                     "description": safe_text(desc)[:100],
                 })
 
         elif otype == "PipeWire:Interface:Port":
+            if len(port_map) >= MAX_PORTS:
+                continue
             node_id = str(props.get("node.id", ""))
             direction = str(props.get("port.direction") or "")
             port_name = str(props.get("port.name") or "")
             node_name = str(props.get("node.name") or "")
-            # Fall back to the node we registered above when the port itself
-            # does not carry node.name (PipeWire versions differ).
+            # Fall back to the node registered above when the port itself does
+            # not carry node.name (PipeWire versions differ).
             if not node_name and node_id in node_map:
                 node_name = node_map[node_id]["name"]
             if not node_name or not port_name or direction not in ("in", "out"):
                 continue
-            full = (node_name + ":" + port_name)[:200]
             port_map[str(oid)] = {
-                "id": str(oid),
+                "id": str(oid)[:20],
                 "node": node_id,
-                "name": full,
+                "name": (node_name + ":" + port_name)[:200],
                 "label": safe_text(port_name)[:80],
                 "direction": direction,
             }
+            ports_by_node.setdefault(node_id, []).append(port_map[str(oid)])
 
     links = []
     for obj in objects:
@@ -161,35 +175,33 @@ def build_graph(objects):
         in_port = str(props.get("link.input.port", ""))
         if out_port in port_map and in_port in port_map:
             links.append({
-                "id": str(obj.get("id", "")),
-                "out": out_port,
-                "in": in_port,
+                "id": str(obj.get("id", ""))[:20],
+                "out": out_port[:20],
+                "in": in_port[:20],
             })
-        if len(links) >= 128:
+        if len(links) >= MAX_LINKS:
             break
 
     # Only audio nodes with at least one port are interesting to a patchbay;
     # MIDI bridges and v4l2 devices would otherwise crowd the canvas.
     nodes = []
     for node in node_map.values():
-        for port in port_map.values():
-            if port["node"] != node["id"]:
-                continue
-            if "Audio" not in node["class"]:
-                continue
-            target = node["outputs"] if port["direction"] == "out" else node["inputs"]
-            target.append({k: port[k] for k in ("id", "name", "label")})
+        if "Audio" not in node["class"]:
+            continue
+        for port in ports_by_node.get(node["id"], []):
+            if port["direction"] == "in" and len(node["inputs"]) < MAX_PORTS_PER_KIND:
+                node["inputs"].append({k: port[k] for k in ("id", "name", "label")})
+            elif port["direction"] == "out" and len(node["outputs"]) < MAX_PORTS_PER_KIND:
+                node["outputs"].append({k: port[k] for k in ("id", "name", "label")})
         if node["outputs"] or node["inputs"]:
-            for key in ("outputs", "inputs"):
-                node[key] = node[key][:32]
             nodes.append(node)
-        if len(nodes) >= 64:
+        if len(nodes) >= MAX_NODES:
             break
 
     return {
         "nodes": nodes,
         "links": links,
-        "managed": managed[:64],
+        "managed": managed,
     }
 
 
@@ -198,7 +210,12 @@ def cmd_graph(_args):
     if objects is None:
         return fail(reason)
     result = build_graph(objects)
-    print(json.dumps(result, separators=(",", ":"))[:60000])
+    payload = json.dumps(result, separators=(",", ":"))
+    if len(payload) > MAX_GRAPH_BYTES:
+        # The builder caps every list, so this is a defensive backstop rather
+        # than an expected path. Never emit half a JSON document.
+        return fail("graph payload too large")
+    print(payload)
     return 0
 
 

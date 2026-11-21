@@ -2,6 +2,7 @@
 """Pure tests for the control helper: no live routing is changed."""
 import importlib.machinery
 import importlib.util
+import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +26,8 @@ assert not ctl.PORT_RE.match("$(whoami)")
 assert len(ctl.safe_text("A" * 500)) <= 240
 assert "<" not in ctl.safe_text("<script>alert(1)</script>")
 assert "&" not in ctl.safe_text("a & b")
+assert "'" in ctl.safe_text("Logitech's Mic")
+assert ctl.safe_text('"studio"') == '"studio"'
 
 # Structured graph building from a pw-dump-shaped object list.
 dump = [
@@ -86,5 +89,22 @@ assert ctl.block_prop(blocks[0], "application.name") == "Brave"
 
 huge = "Sink Input #1\n" + ("x\n" * 10000)
 assert len(ctl.pactl_blocks(huge, "Sink Input #")[0]["lines"]) <= 4000
+
+# A pathological graph stays bounded: the canvas payload can never exceed what
+# the Run block keeps, and no node carries an unbounded port list.
+big = []
+for node_id in range(200):
+    big.append({"id": node_id, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "node_%d" % node_id, "media.class": "Audio/Sink"}}})
+    for port in range(60):
+        big.append({"id": 1000 + node_id * 100 + port,
+                    "type": "PipeWire:Interface:Port", "info": {"props": {
+                        "node.id": node_id, "port.name": "p%d" % port,
+                        "port.direction": "in" if port % 2 else "out"}}})
+bounded = ctl.build_graph(big)
+assert len(bounded["nodes"]) <= ctl.MAX_NODES
+assert all(len(n["inputs"]) <= ctl.MAX_PORTS_PER_KIND for n in bounded["nodes"])
+assert all(len(n["outputs"]) <= ctl.MAX_PORTS_PER_KIND for n in bounded["nodes"])
+assert len(json.dumps(bounded)) < ctl.MAX_GRAPH_BYTES
 
 print("control-helper tests passed")
