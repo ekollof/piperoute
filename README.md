@@ -78,15 +78,36 @@ All of these tools ship with a normal PipeWire/WirePlumber install.
 - Omarchy 4 with the Quattro shell and plugin support.
 - A running PipeWire session with WirePlumber, `pw-dump`, `pw-link`, `pw-cli`,
   `wpctl` and `pactl` on `PATH` (the standard Omarchy setup).
+- `/usr/bin/python3` for the small control helper. Omarchy ships Python; the
+  plugin installs nothing.
+
+No configuration, credentials, service, package or privileged setup is needed.
+The plugin talks to the PipeWire session that is already running.
 
 ## Installation
 
-This plugin lives in `~/.config/omarchy/plugins/io.github.ekollof.piperoute`.
-To put it on the bar:
+```bash
+omarchy plugin add https://github.com/ekollof/io.github.ekollof.piperoute.git --enable
+```
+
+`omarchy plugin install` is an alias for the same command. The plugin is
+self-contained: the manifest, QML, helper and translations are all in the
+repository, and enabling it places the bar widget automatically.
+
+From an existing checkout:
+
+```bash
+omarchy plugin add "$(pwd)" --enable
+```
+
+If the widget is not on the bar, place it with:
 
 ```bash
 omarchy bar put io.github.ekollof.piperoute --section right
 ```
+
+The `preview.png` in this repository uses fictional devices and streams; it is
+not a capture of a real session.
 
 ## Validation and tests
 
@@ -100,6 +121,24 @@ omarchy agent look plugin .
 routing direction; `tests/test_ctl.py` covers input validation and the
 structured graph builder that feeds the canvas.
 
+## Update
+
+```bash
+omarchy plugin update io.github.ekollof.piperoute
+```
+
+## Support
+
+Bugs and feature requests go to the repository's issue tracker. Security
+reports go through a private security advisory, not a public issue.
+
+## Tested on
+
+Omarchy source `eb97d5307dd20d6cdf1f78eab31d0b260f50db0d` with Quickshell
+0.3.2 (`2b4501a`), PipeWire 1.6.11 and WirePlumber 0.5.19. Other Quattro
+versions may differ; the plugin uses only documented hosted QML components and
+the installed PipeWire CLI tools.
+
 ## Removal
 
 ```bash
@@ -110,11 +149,36 @@ The plugin keeps no state of its own. Virtual devices it created remain in the
 PipeWire graph until removed (with the canvas toolbar, the compact menu, or
 `pw-cli destroy`).
 
-## Security
+## Access and security model
 
-Omarchy plugins run as unsandboxed code inside `omarchy-shell`. Commands go
-through the omakit `Run` block with a hard deadline, bounded output and a
-closed environment. No secrets, credentials or network access are involved.
+Omarchy plugins run as unsandboxed code inside `omarchy-shell`, so the
+boundary matters:
+
+- **Who can reach the controls.** Only the person at the session. The plugin
+  registers no IPC target, no D-Bus service, no socket, no global shortcut and
+  no network listener. The overlay opens only from its own bar button and takes
+  exclusive keyboard focus only while it is visible.
+- **What is executed.** One helper, `bin/piperoute-ctl`, started through the
+  omakit `Run` block: absolute executable, argv only, a closed environment, a
+  hard deadline and byte/line caps. The helper invokes only the installed
+  PipeWire tools (`pw-dump`, `pw-link`, `pw-cli`, `wpctl`, `pactl`), also with
+  argv arrays. It never uses a shell or any privilege-escalation tool, and adds
+  no privilege: everything it does is what the user can already do with those
+  tools.
+- **What is written.** Nothing. The plugin has no settings, state or cache
+  files. It changes only the live PipeWire graph. Virtual devices it creates
+  are ordinary PipeWire nodes and can be removed from the canvas; once the
+  plugin is removed, destroy any that remain with `pw-cli destroy`.
+- **What is trusted.** Node, port and error text from PipeWire is treated as
+  untrusted: sanitised, bounded, and rendered with `Text.PlainText` in every
+  sink. There are no credentials, tokens, telemetry or network requests, and
+  nothing secret is put in argv or logs.
+- **Removal.** `omarchy plugin remove io.github.ekollof.piperoute` deletes the
+  plugin directory; no other files or services are touched.
+
+Report security problems through a private security advisory on the repository
+rather than a public issue. The marketplace security baseline and this README
+are limited evidence for one commit, not a security audit.
 
 ## License
 
