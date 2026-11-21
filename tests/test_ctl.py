@@ -26,24 +26,45 @@ assert len(ctl.safe_text("A" * 500)) <= 240
 assert "<" not in ctl.safe_text("<script>alert(1)</script>")
 assert "&" not in ctl.safe_text("a & b")
 
-# Port/link parsing from pw-link -l -I, including the duplicated reverse view.
-ports = ctl.parse_ports("  45 node:monitor_FL\n  81 node:playback_AUX0\n")
-assert [p["id"] for p in ports] == ["45", "81"]
-assert ports[0]["name"] == "node:monitor_FL"
+# Structured graph building from a pw-dump-shaped object list.
+dump = [
+    {"id": 10, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "alsa_output.usb-UMC", "node.description": "UMC 404HD",
+        "media.class": "Audio/Sink"}}},
+    {"id": 11, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "Brave", "media.class": "Stream/Output/Audio"}}},
+    {"id": 12, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "Midi-Bridge", "media.class": "Midi/Sink"}}},
+    {"id": 20, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 10, "port.name": "playback_FL", "port.direction": "in"}}},
+    {"id": 21, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 10, "port.name": "monitor_FL", "port.direction": "out"}}},
+    {"id": 22, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 11, "port.name": "output_FL", "port.direction": "out"}}},
+    {"id": 23, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 12, "port.name": "Port-0", "port.direction": "out"}}},
+    {"id": 30, "type": "PipeWire:Interface:Link", "info": {"props": {
+        "link.output.port": 22, "link.input.port": 20}}},
+]
+graph = ctl.build_graph(dump)
+by_name = {n["name"]: n for n in graph["nodes"]}
+assert set(by_name) == {"alsa_output.usb-UMC", "Brave"}, by_name.keys()
+assert by_name["Brave"]["kind"] == "stream"
+assert by_name["alsa_output.usb-UMC"]["label"] == "UMC 404HD"
+assert by_name["Brave"]["outputs"][0]["name"] == "Brave:output_FL"
+assert by_name["alsa_output.usb-UMC"]["inputs"][0]["name"] == "alsa_output.usb-UMC:playback_FL"
+assert graph["links"] == [{"id": "30", "out": "22", "in": "20"}]
+assert graph["managed"] == []
 
-link_dump = """  81 UMC:playback_AUX0
- 113   |<-  114 Brave:output_FL
- 114 Brave:output_FL
- 113   |->   81 UMC:playback_AUX0
-  57 UMC:playback_AUX1
-  96   |<-   95 Brave:output_FR
-"""
-links = ctl.parse_links(link_dump)
-assert len(links) == 2, links
-assert links[0]["id"] == "113"
-assert links[0]["out"] == "Brave:output_FL"
-assert links[0]["in"] == "UMC:playback_AUX0"
-assert links[1]["id"] == "96"
+# A node this plugin created is reported as managed and tagged as virtual.
+dump.append({"id": 13, "type": "PipeWire:Interface:Node", "info": {"props": {
+    "node.name": "pr_node_abcd", "media.class": "Audio/Sink",
+    "node.description": "pr_node_abcd"}}})
+dump.append({"id": 24, "type": "PipeWire:Interface:Port", "info": {"props": {
+    "node.id": 13, "port.name": "playback_FL", "port.direction": "in"}}})
+managed_graph = ctl.build_graph(dump)
+assert managed_graph["managed"][0]["name"] == "pr_node_abcd"
+assert any(n["kind"] == "virtual" for n in managed_graph["nodes"])
 
 # Bounded parsing of a pactl dump and the object.id -> index mapping.
 pactl_raw = """Sink Input #128451

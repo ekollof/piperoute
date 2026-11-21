@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.piperoute",
   "name": "PipeRoute",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Emiel Kollof",
   "license": "MIT",
-  "description": "Advanced PipeWire audio routing: patch arbitrary ports, create virtual sinks/sources, and route streams, straight from the running graph.",
+  "description": "Graphical PipeWire patchbay: drag cables between ports on a node canvas, create virtual sinks/sources, and route streams, straight from the running graph.",
   "kinds": [
     "bar-widget"
   ],
