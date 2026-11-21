@@ -29,6 +29,8 @@ PanelWindow {
 
   readonly property color onScrim: "white"
   readonly property color onScrimDim: Qt.rgba(1, 1, 1, 0.55)
+  // Near-opaque by default so the tool reads cleanly over any wallpaper.
+  property real scrimOpacity: 0.96
   readonly property color boxFill: "#1b1c26"
   readonly property color boxBorder: "#3b3d52"
   readonly property color cable: Qt.rgba(0.35, 0.85, 0.82, 0.95)
@@ -241,7 +243,7 @@ PanelWindow {
 
   Rectangle {
     anchors.fill: parent
-    color: Qt.rgba(0.02, 0.02, 0.04, 0.96)
+    color: Qt.rgba(0.02, 0.02, 0.04, win.scrimOpacity)
     MouseArea { anchors.fill: parent; onClicked: win.closeRequested() }
   }
 
