@@ -27,13 +27,18 @@ PanelWindow {
   signal actionRequested(string action, var args)
   signal refreshRequested()
 
-  readonly property color onScrim: "white"
-  readonly property color onScrimDim: Qt.rgba(1, 1, 1, 0.55)
+  // Semantic theme roles, so the patchbay follows every Omarchy theme and the
+  // light/dark switch without a second palette. `background` is the scrim,
+  // `popups.*` is the node surface, `accent` is the cabling and `muted` is
+  // secondary text.
+  readonly property color onScrim: Commons.Color.foreground
+  readonly property color onScrimDim: Commons.Color.muted
+  readonly property color boxFill: Commons.Color.popups.background
+  readonly property color boxBorder: Commons.Color.popups.border
+  readonly property color cable: Commons.Color.accent
+  readonly property color errorColor: Commons.Color.urgent
   // Near-opaque by default so the tool reads cleanly over any wallpaper.
   property real scrimOpacity: 0.96
-  readonly property color boxFill: "#1b1c26"
-  readonly property color boxBorder: "#3b3d52"
-  readonly property color cable: Qt.rgba(0.35, 0.85, 0.82, 0.95)
 
   readonly property int nodeWidth: 248
   readonly property int headerHeight: 30
@@ -243,7 +248,7 @@ PanelWindow {
 
   Rectangle {
     anchors.fill: parent
-    color: Qt.rgba(0.02, 0.02, 0.04, win.scrimOpacity)
+    color: Util.alpha(Commons.Color.background, win.scrimOpacity)
     MouseArea { anchors.fill: parent; onClicked: win.closeRequested() }
   }
 
@@ -294,7 +299,7 @@ PanelWindow {
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
         text: win.statusText + (win.errorText ? "  ·  " + win.errorText : "")
-        color: win.errorText ? "#ff8a8a" : win.onScrimDim
+        color: win.errorText ? win.errorColor : win.onScrimDim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -376,18 +381,12 @@ PanelWindow {
             radius: 10
             clip: true
             color: win.boxFill
-            border.color: modelData.kind === "stream" ? "#4a6f8a"
-              : modelData.kind === "virtual" ? "#6a5a8a" : win.boxBorder
+            border.color: modelData.kind === "stream"
+              ? Util.alpha(Commons.Color.accent, 0.55)
+              : modelData.kind === "virtual"
+                ? Util.alpha(Commons.Color.accent, 0.8)
+                : win.boxBorder
             border.width: 1
-
-            Rectangle {
-              anchors.fill: parent
-              radius: parent.radius
-              color: "transparent"
-              border.color: win.boxBorder
-              border.width: 1
-              opacity: 0.5
-            }
 
             Text {
               anchors.left: parent.left
@@ -415,8 +414,8 @@ PanelWindow {
                 Rectangle {
                   width: 10; height: 10; radius: 5
                   anchors.verticalCenter: parent.verticalCenter
-                  color: "#8fd1c9"
-                  border.color: "#1d2a2a"
+                  color: win.cable
+                  border.color: win.boxFill
                   border.width: 1
                   x: -12
                 }
@@ -460,7 +459,7 @@ PanelWindow {
                 y: win.portTop + index * win.portStep + win.portStep / 2 - 5
                 width: 10; height: 10; radius: 5
                 color: win.cable
-                border.color: "#18302f"
+                border.color: win.boxFill
                 border.width: 1
               }
             }
@@ -478,7 +477,7 @@ PanelWindow {
             z: 3
             Rectangle {
               width: 18; height: 18; radius: 9
-              color: "#2a2b3a"
+              color: win.boxFill
               border.color: win.cable
               border.width: 1
               Text {
