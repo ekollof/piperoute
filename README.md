@@ -64,6 +64,9 @@ the way.
   (`Text.PlainText` everywhere). Live `PwNode` objects are never held by a
   visual delegate — only primitive snapshots — so graph teardowns cannot crash
   the shell.
+- The graph read is capped (48 nodes, 20 ports per side, 128 links, a 900 kB
+  JSON document) so a pathological session cannot lock or truncate the shell.
+  Automatic refreshes are debounced and rate-limited to at most one per second.
 
 All of these tools ship with a normal PipeWire/WirePlumber install.
 

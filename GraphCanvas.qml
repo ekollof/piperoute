@@ -361,6 +361,7 @@ PanelWindow {
             width: win.nodeWidth
             height: win.nodeHeight(modelData)
             radius: 10
+            clip: true
             color: win.boxFill
             border.color: modelData.kind === "stream" ? "#4a6f8a"
               : modelData.kind === "virtual" ? "#6a5a8a" : win.boxBorder
@@ -407,7 +408,9 @@ PanelWindow {
                   x: -12
                 }
                 Text {
+                  width: win.nodeWidth - 34
                   textFormat: Text.PlainText
+                  elide: Text.ElideRight
                   text: modelData.label
                   color: win.onScrimDim
                   font.family: Style.font.family
@@ -423,6 +426,9 @@ PanelWindow {
                 required property int index
                 anchors.right: parent.right
                 anchors.rightMargin: 12
+                width: win.nodeWidth - 28
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideLeft
                 y: win.portTop + index * win.portStep
                 textFormat: Text.PlainText
                 text: modelData.label + " 󰁧"
