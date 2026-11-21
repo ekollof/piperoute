@@ -45,6 +45,15 @@ PanelWindow {
   property real dragOffsetX: 0
   property real dragOffsetY: 0
   property string hoverText: ""
+  property real panStartX: 0
+  property real panStartY: 0
+  property real panContentX: 0
+  property real panContentY: 0
+  property real graphWidth: 1040
+  property real graphHeight: 760
+
+  // A live drag must not be interrupted by an automatic graph refresh.
+  readonly property bool dragging: dragMode !== "" || pendingFrom !== null
 
   visible: opened
   anchors { top: true; bottom: true; left: true; right: true }
@@ -74,12 +83,13 @@ PanelWindow {
       var node = {
         id: id,
         name: String(source.name || "").slice(0, 200),
-        label: String(source.label || source.name || id).slice(0, 100),
+        label: plain(source.label || source.name || id, 100),
         kind: String(source.kind || "").slice(0, 20),
         inputs: boundPorts(source.inputs),
         outputs: boundPorts(source.outputs),
         x: existing ? existing.x : 0,
-        y: existing ? existing.y : 0
+        y: existing ? existing.y : 0,
+        positioned: existing ? true : false
       }
       if (source.kind === "stream") streams.push(node)
       else if (source.kind === "virtual") virtuals.push(node)
@@ -89,19 +99,25 @@ PanelWindow {
     var columns = [streams, virtuals, devices]
     var columnX = [48, 372, 696]
     var placed = []
+    var maxX = 1040, maxY = 760
     for (var c = 0; c < columns.length; c++) {
       var column = columns[c]
       var nextY = 56
       for (var k = 0; k < column.length; k++) {
         var item = column[k]
-        if (item.x === 0 && item.y === 0) {
+        if (!item.positioned) {
           item.x = columnX[c]
           item.y = nextY
+          item.positioned = true
         }
-        nextY += nodeHeight(item) + 18
+        nextY = Math.max(nextY, item.y + nodeHeight(item) + 18)
+        maxX = Math.max(maxX, item.x + win.nodeWidth + 40)
+        maxY = Math.max(maxY, item.y + nodeHeight(item) + 40)
         placed.push(item)
       }
     }
+    win.graphWidth = maxX
+    win.graphHeight = maxY
     win.nodes = placed
     win.graph = {
       nodes: data.nodes.slice(0, 64),
@@ -109,6 +125,21 @@ PanelWindow {
       managed: Array.isArray(data.managed) ? data.managed.slice(0, 64) : []
     }
     drawWires()
+  }
+
+  // Defence in depth: the helper already sanitizes, but the canvas is a text
+  // sink of its own and must not depend on that being true forever. Only
+  // display fields pass through here; port *names* used for actions stay exact.
+  function plain(value, limit) {
+    var text = String(value === undefined || value === null ? "" : value)
+    var out = ""
+    for (var i = 0; i < text.length && out.length < limit; i++) {
+      var ch = text.charAt(i)
+      var code = text.charCodeAt(i)
+      if (ch === "<" || ch === ">" || ch === "&" || code < 32 || code === 127) out += " "
+      else out += ch
+    }
+    return out.replace(/\s+/g, " ").trim()
   }
 
   function boundPorts(list) {
@@ -120,7 +151,7 @@ PanelWindow {
       out.push({
         id: String(p.id || "").slice(0, 20),
         name: String(p.name || "").slice(0, 200),
-        label: String(p.label || p.name || "").slice(0, 80)
+        label: plain(p.label || p.name || "", 80)
       })
     }
     return out
@@ -211,6 +242,16 @@ PanelWindow {
     Keys.onPressed: event => {
       if (event.key === Qt.Key_R || event.key === Qt.Key_F5) { win.refreshRequested(); event.accepted = true }
     }
+    // Arrow keys pan the canvas; the mouse drag pans it too.
+    Keys.onLeftPressed: keyCatcher.panBy(120, 0)
+    Keys.onRightPressed: keyCatcher.panBy(-120, 0)
+    Keys.onUpPressed: keyCatcher.panBy(0, 120)
+    Keys.onDownPressed: keyCatcher.panBy(0, -120)
+
+    function panBy(dx, dy) {
+      flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, flick.contentX + dx))
+      flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + dy))
+    }
 
     // Swallow clicks that land on the chrome so the scrim does not close.
     MouseArea {
@@ -275,9 +316,11 @@ PanelWindow {
       anchors.topMargin: 58
       anchors.bottomMargin: 46
       clip: true
-      contentWidth: Math.max(width, 1040)
-      contentHeight: Math.max(height, 760)
-      flickableDirection: Flickable.HorizontalAndVerticalFlick
+      contentWidth: Math.max(width, win.graphWidth)
+      contentHeight: Math.max(height, win.graphHeight)
+      // Panning is handled inside the world MouseArea, where a drag can be
+      // told apart from a port drag; a Flickable drag would fight it.
+      interactive: false
       boundsBehavior: Flickable.StopAtBounds
 
       Item {
@@ -458,14 +501,19 @@ PanelWindow {
           anchors.fill: parent
           z: 5
           hoverEnabled: true
+          acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+
+          onExited: win.hoverText = ""
 
           onPressed: mouse => {
+            if (mouse.button !== Qt.LeftButton) return
             // 1. cable midpoint -> remove
             var links = win.graph.links || []
             for (var i = 0; i < links.length; i++) {
               var mid = win.linkMidpoint(links[i])
               if (mid && Math.abs(mid.x - mouse.x) <= 12 && Math.abs(mid.y - mouse.y) <= 12) {
                 win.actionRequested("disconnect", [links[i].id])
+                mouse.accepted = true
                 return
               }
             }
@@ -491,6 +539,14 @@ PanelWindow {
                 return
               }
             }
+            // 4. empty canvas -> pan
+            var scene = world.mapToItem(null, mouse.x, mouse.y)
+            win.dragMode = "pan"
+            win.panStartX = scene.x
+            win.panStartY = scene.y
+            win.panContentX = flick.contentX
+            win.panContentY = flick.contentY
+            mouse.accepted = true
           }
 
           onPositionChanged: mouse => {
@@ -498,9 +554,17 @@ PanelWindow {
               win.pendingTo = { x: mouse.x, y: mouse.y }
               win.drawPending()
             } else if (win.dragMode === "node" && win.dragNode) {
-              win.dragNode.x = Math.max(8, mouse.x - win.dragOffsetX)
-              win.dragNode.y = Math.max(8, mouse.y - win.dragOffsetY)
+              win.dragNode.x = Math.max(8, Math.min(win.graphWidth - win.nodeWidth - 8,
+                mouse.x - win.dragOffsetX))
+              win.dragNode.y = Math.max(8, Math.min(win.graphHeight - win.nodeHeight(win.dragNode) - 8,
+                mouse.y - win.dragOffsetY))
               win.refreshNodes()
+            } else if (win.dragMode === "pan") {
+              var scene = world.mapToItem(null, mouse.x, mouse.y)
+              flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width,
+                win.panContentX - (scene.x - win.panStartX)))
+              flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height,
+                win.panContentY - (scene.y - win.panStartY)))
             } else {
               var p = win.portAt(mouse.x, mouse.y, "out") || win.portAt(mouse.x, mouse.y, "in")
               win.hoverText = p ? p.node.label + " · " + p.port.label : ""
@@ -512,7 +576,16 @@ PanelWindow {
               var input = win.portAt(mouse.x, mouse.y, "in")
               if (input) {
                 var source = win.findPort(win.pendingFrom, "out")
-                if (source) win.actionRequested("connect", [source.port.name, input.port.name])
+                // Do not stack a duplicate link on an existing one.
+                var exists = false
+                var links = win.graph.links || []
+                for (var i = 0; i < links.length; i++) {
+                  if (links[i].out === win.pendingFrom && links[i]["in"] === input.port.id) {
+                    exists = true
+                    break
+                  }
+                }
+                if (source && !exists) win.actionRequested("connect", [source.port.name, input.port.name])
               }
               win.pendingFrom = null
               win.pendingTo = null
@@ -520,6 +593,18 @@ PanelWindow {
             }
             win.dragMode = ""
             win.dragNode = null
+          }
+        }
+
+        WheelHandler {
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: event => {
+            var dx = event.angleDelta.x
+            var dy = event.angleDelta.y
+            if (event.modifiers & Qt.ShiftModifier) { dx = dy; dy = 0 }
+            flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, flick.contentX - dx))
+            flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY - dy))
+            event.accepted = true
           }
         }
       }

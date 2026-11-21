@@ -6,7 +6,9 @@ const M = require('../RoutingModel.js')
 // not survive the sanitizer that feeds the bar's tooltip/share sinks.
 const evil = '<img src="https://example.invalid/tracker"> & "x" \'<b>y</b>'
 const clean = M.safeLabel(evil, 200)
-assert.ok(!/[<>&"']/.test(clean), 'markup characters removed: ' + clean)
+assert.ok(!/[<>&]/.test(clean), 'markup characters removed: ' + clean)
+assert.ok(clean.includes('"x"'), 'quotes retained for honest names: ' + clean)
+assert.equal(M.safeLabel("Logitech's Mic", 80), "Logitech's Mic", 'apostrophes retained')
 assert.ok(!clean.includes('\n'), 'newlines collapsed')
 assert.equal(M.safeLabel('A'.repeat(500), 80).length, 80, 'label bounded')
 assert.equal(M.safeToken('a;rm -rf /$()'), 'arm-rf', 'node name token restricted')
