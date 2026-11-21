@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "RoutingModel.js" as Model
 
 /**
  * Fullscreen PipeWire patchbay, in the spirit of qpwgraph / Carla.
@@ -73,7 +74,10 @@ PanelWindow {
     var old = {}
     for (var i = 0; i < win.nodes.length; i++) old[win.nodes[i].id] = win.nodes[i]
 
-    var streams = [], virtuals = [], devices = []
+    // Initial placement follows the signal flow, not the node kind: outputs
+    // only on the left (producers), both in the middle (processing), inputs
+    // only on the right (consumers). Nodes the user moved keep their spot.
+    var columns = [[], [], []]
     for (var n = 0; n < data.nodes.length && n < 64; n++) {
       var source = data.nodes[n]
       if (!source || typeof source !== "object") continue
@@ -91,12 +95,19 @@ PanelWindow {
         y: existing ? existing.y : 0,
         positioned: existing ? true : false
       }
-      if (source.kind === "stream") streams.push(node)
-      else if (source.kind === "virtual") virtuals.push(node)
-      else devices.push(node)
+      columns[Model.layoutColumn(node)].push(node)
     }
 
-    var columns = [streams, virtuals, devices]
+    // Keep each column tidy without disturbing placed nodes: streams first,
+    // then virtual devices, then hardware.
+    var rank = { stream: 0, virtual: 1, device: 2 }
+    for (var r = 0; r < columns.length; r++) {
+      columns[r].sort(function(a, b) {
+        return (rank[a.kind] === undefined ? 3 : rank[a.kind])
+          - (rank[b.kind] === undefined ? 3 : rank[b.kind])
+      })
+    }
+
     var columnX = [48, 372, 696]
     var placed = []
     var maxX = 1040, maxY = 760

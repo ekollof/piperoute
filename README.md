@@ -20,9 +20,12 @@ for defaults, stream routing and virtual devices.
 
 A full-screen canvas on the monitor you clicked, with:
 
-- **Nodes** — one box per audio node. Playback streams are on the left, virtual
-  devices in the middle, hardware devices on the right. Each box lists its
-  input ports on the left edge and output ports on the right edge.
+- **Nodes** — one box per audio node, laid out left-to-right by signal flow:
+  outputs-only nodes (playback streams, source devices) on the left, nodes with
+  both inputs and outputs (sinks with monitors, virtual devices) in the middle,
+  and inputs-only nodes (capture streams) on the right. Each box lists its input
+  ports on the left edge and output ports on the right edge. You can drag any
+  node elsewhere; its position is kept across refreshes.
 - **Cables** — bezier curves drawn between the ports that are actually linked
   in PipeWire. They follow the nodes when you move them.
 - **Drag an output port onto an input port** to create a link. A dashed cable
