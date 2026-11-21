@@ -31,8 +31,11 @@ A full-screen canvas on the monitor you clicked, with:
 - **Drag a node by its title bar** to rearrange the canvas.
 - **Click the × at a cable's midpoint** to remove that link.
 - **Toolbar** — Refresh, `+ Virtual output`, `+ Virtual input`, Close. `R`
-  refreshes, `Esc` closes. The canvas also refreshes automatically every few
-  seconds while open.
+  refreshes, `Esc` closes.
+- **Updates** — the canvas re-reads the graph immediately when Quickshell's
+  native PipeWire model reports a node or link change (debounced so a burst is
+  one read), plus a 5-second safety poll for changes that model doesn't signal
+  (such as a null sink created by another client).
 
 Only audio nodes are shown; MIDI bridges and webcam video nodes stay out of
 the way.

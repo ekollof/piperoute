@@ -46,8 +46,8 @@ BarWidget {
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
   Component.onCompleted: resnapshot()
-  onPwNodesChanged: resnapshot()
-  onPwLinksChanged: resnapshot()
+  onPwNodesChanged: { resnapshot(); scheduleGraphRefresh() }
+  onPwLinksChanged: { resnapshot(); scheduleGraphRefresh() }
   onDefaultSinkNodeChanged: resnapshot()
   onDefaultSourceNodeChanged: resnapshot()
 
@@ -97,6 +97,12 @@ BarWidget {
   }
 
   function refreshGraph() { runCtl("graph", []) }
+
+  // Topology changes arrive as native Pipewire events. Debounce them so a
+  // burst of node/link changes causes one graph read, not one per signal.
+  function scheduleGraphRefresh() {
+    if (root.graphOpen) graphDebounce.restart()
+  }
 
   function takeGraph(text) {
     var data
@@ -176,6 +182,25 @@ BarWidget {
     onFinished: result => root.finish(result)
   }
 
+  Connections {
+    target: Pipewire.nodes
+    function onValuesChanged() { root.resnapshot(); root.scheduleGraphRefresh() }
+  }
+  Connections {
+    target: Pipewire.linkGroups
+    function onValuesChanged() { root.scheduleGraphRefresh() }
+  }
+
+  Timer {
+    id: graphDebounce
+    interval: 200
+    repeat: false
+    onTriggered: if (root.graphOpen && !ctl.running) root.refreshGraph()
+  }
+
+  // Safety net for changes the native PipeWire model does not signal (for
+  // example a new null sink made by another client). The event path above is
+  // what makes ordinary changes appear immediately.
   Timer {
     interval: 5000
     repeat: true
