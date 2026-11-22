@@ -37,9 +37,12 @@ dump = [
     {"id": 11, "type": "PipeWire:Interface:Node", "info": {"props": {
         "node.name": "Brave", "media.class": "Stream/Output/Audio"}}},
     {"id": 12, "type": "PipeWire:Interface:Node", "info": {"props": {
-        "node.name": "Midi-Bridge", "media.class": "Midi/Sink"}}},
+        "node.name": "Midi-Bridge", "media.class": "Midi/Bridge"}}},
     {"id": 14, "type": "PipeWire:Interface:Node", "info": {"props": {
         "node.name": "webcam", "media.class": "Video/Source"}}},
+    {"id": 15, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "bluez_midi.server", "node.description": "BLE MIDI 1",
+        "media.class": "Midi/Bridge"}}},
     {"id": 20, "type": "PipeWire:Interface:Port", "info": {"props": {
         "node.id": 10, "port.name": "playback_FL", "port.direction": "in"}}},
     {"id": 21, "type": "PipeWire:Interface:Port", "info": {"props": {
@@ -47,7 +50,17 @@ dump = [
     {"id": 22, "type": "PipeWire:Interface:Port", "info": {"props": {
         "node.id": 11, "port.name": "output_FL", "port.direction": "out"}}},
     {"id": 23, "type": "PipeWire:Interface:Port", "info": {"props": {
-        "node.id": 12, "port.name": "Port-0", "port.direction": "out"}}},
+        "node.id": 12, "port.name": "Midi Through: Port-0 (capture)",
+        "object.path": "alsa:seq:default:client_14:capture_0",
+        "port.direction": "out"}}},
+    {"id": 26, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 12, "port.name": "UMC404HD 192k: MIDI 1 (playback)",
+        "object.path": "alsa:seq:default:client_16:playback_0",
+        "port.direction": "in"}}},
+    {"id": 27, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 15, "port.name": "in", "port.direction": "in"}}},
+    {"id": 28, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 15, "port.name": "out", "port.direction": "out"}}},
     {"id": 25, "type": "PipeWire:Interface:Port", "info": {"props": {
         "node.id": 14, "port.name": "capture_1", "port.direction": "out"}}},
     {"id": 30, "type": "PipeWire:Interface:Link", "info": {"props": {
@@ -55,11 +68,17 @@ dump = [
 ]
 graph = ctl.build_graph(dump)
 by_name = {n["name"]: n for n in graph["nodes"]}
-assert set(by_name) == {"alsa_output.usb-UMC", "Brave", "Midi-Bridge"}, by_name.keys()
+assert set(by_name) == {
+    "alsa_output.usb-UMC", "Brave", "14:Midi Through", "16:UMC404HD 192k", "bluez_midi.server"
+}, by_name.keys()
 assert "webcam" not in by_name, "video nodes stay out of the patchbay"
+assert "Midi-Bridge" not in by_name, "the bridge is split into per-client boxes"
 assert by_name["Brave"]["kind"] == "stream"
-assert by_name["Midi-Bridge"]["kind"] == "midi"
-assert by_name["Midi-Bridge"]["outputs"][0]["name"] == "Midi-Bridge:Port-0"
+assert by_name["14:Midi Through"]["kind"] == "midi"
+assert by_name["14:Midi Through"]["outputs"][0]["name"] == "Midi-Bridge:Midi Through: Port-0 (capture)"
+assert by_name["16:UMC404HD 192k"]["inputs"][0]["name"] == "Midi-Bridge:UMC404HD 192k: MIDI 1 (playback)"
+assert by_name["bluez_midi.server"]["label"] == "BLE MIDI 1"
+assert by_name["bluez_midi.server"]["outputs"][0]["name"] == "bluez_midi.server:out"
 assert by_name["alsa_output.usb-UMC"]["label"] == "UMC 404HD"
 assert by_name["Brave"]["outputs"][0]["name"] == "Brave:output_FL"
 assert by_name["alsa_output.usb-UMC"]["inputs"][0]["name"] == "alsa_output.usb-UMC:playback_FL"

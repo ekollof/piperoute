@@ -102,6 +102,57 @@ def dump_json():
     return (data if isinstance(data, list) else []), ""
 
 
+def midi_client_number(path):
+    """ALSA seq ports carry client_N in object.path; qpwgraph shows that N."""
+    match = re.search(r"client_([0-9]+)", str(path or ""))
+    return match.group(1) if match else ""
+
+
+def split_midi_bridge(node):
+    """Split one Midi/Bridge into per-ALSA-client boxes, like qpwgraph.
+
+    A bridge node aggregates unrelated clients such as `Midi Through` and
+    `UMC404HD 192k`; showing them as one box hides the MIDI sources the user
+    is looking for. Port ids and full port names stay unchanged, so links and
+    clicks still address the real bridge ports.
+    """
+    groups = {}
+    leftovers = {"inputs": [], "outputs": []}
+    for direction in ("inputs", "outputs"):
+        for port in node[direction]:
+            label = port["label"]
+            if ":" in label:
+                group = label.split(":", 1)[0].strip()
+                client = midi_client_number(port.get("path", ""))
+                groups.setdefault((client, group), {"inputs": [], "outputs": []})[direction].append(port)
+            else:
+                leftovers[direction].append(port)
+
+    def clean(ports):
+        return [{k: p[k] for k in ("id", "name", "label")} for p in ports]
+
+    out = []
+    ordered = sorted(groups, key=lambda key: (
+        int(key[0]) if key[0].isdigit() else 0, key[1]))
+    for index, key in enumerate(ordered):
+        client, group = key
+        label = ((client + ":") if client else "") + group
+        out.append({
+            "id": "midi-" + node["id"] + "-" + str(index),
+            "name": label,
+            "label": label,
+            "class": "Midi/Bridge",
+            "kind": "midi",
+            "inputs": clean(groups[key]["inputs"]),
+            "outputs": clean(groups[key]["outputs"]),
+        })
+    if leftovers["inputs"] or leftovers["outputs"]:
+        node["inputs"] = clean(leftovers["inputs"])
+        node["outputs"] = clean(leftovers["outputs"])
+        out.append(node)
+    return out
+
+
 def build_graph(objects):
     """Shape pw-dump objects into a graph the QML canvas can lay out.
 
@@ -164,6 +215,7 @@ def build_graph(objects):
                 "node": node_id,
                 "name": (node_name + ":" + port_name)[:200],
                 "label": safe_text(port_name)[:80],
+                "path": str(props.get("object.path") or "")[:160],
                 "direction": direction,
             }
             ports_by_node.setdefault(node_id, []).append(port_map[str(oid)])
@@ -192,16 +244,22 @@ def build_graph(objects):
             continue
         for port in ports_by_node.get(node["id"], []):
             if port["direction"] == "in" and len(node["inputs"]) < MAX_PORTS_PER_KIND:
-                node["inputs"].append({k: port[k] for k in ("id", "name", "label")})
+                node["inputs"].append({k: port[k] for k in ("id", "name", "label", "path")})
             elif port["direction"] == "out" and len(node["outputs"]) < MAX_PORTS_PER_KIND:
-                node["outputs"].append({k: port[k] for k in ("id", "name", "label")})
-        if node["outputs"] or node["inputs"]:
+                node["outputs"].append({k: port[k] for k in ("id", "name", "label", "path")})
+        if not node["outputs"] and not node["inputs"]:
+            continue
+        if "Midi/Bridge" in node["class"]:
+            nodes.extend(split_midi_bridge(node))
+        else:
+            for direction in ("inputs", "outputs"):
+                node[direction] = [{k: p[k] for k in ("id", "name", "label")} for p in node[direction]]
             nodes.append(node)
         if len(nodes) >= MAX_NODES:
             break
 
     return {
-        "nodes": nodes,
+        "nodes": nodes[:MAX_NODES],
         "links": links,
         "managed": managed,
     }

@@ -48,8 +48,11 @@ A full-screen canvas on the monitor you clicked, with:
   one read), plus a 5-second safety poll for changes that model doesn't signal
   (such as a null sink created by another client).
 
-Audio and MIDI nodes are shown; webcam/video nodes stay out of the way. The
-compact menu still handles audio devices and streams only.
+Audio and MIDI nodes are shown; webcam/video nodes stay out of the way. ALSA
+MIDI clients aggregated by `Midi-Bridge` are split into per-client boxes such
+as `14:Midi Through` and `16:UMC404HD 192k`, matching qpwgraph, so the MIDI
+side of an audio interface is visible next to its audio ports. The compact
+menu still handles audio devices and streams only.
 
 ### Compact menu (right click)
 
