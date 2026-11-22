@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.piperoute",
   "name": "PipeRoute",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "author": "Emiel Kollof",
   "license": "MIT",
   "description": "Graphical PipeWire patchbay: drag cables between ports on a node canvas, create virtual sinks/sources, and route streams, straight from the running graph.",

@@ -182,9 +182,10 @@ boundary matters:
 - **Removal.** `omarchy plugin remove io.github.ekollof.piperoute` deletes the
   plugin directory; no other files or services are touched.
 
-Report security problems through a private security advisory on the repository
-rather than a public issue. The marketplace security baseline and this README
-are limited evidence for one commit, not a security audit.
+See [SECURITY.md](SECURITY.md) for the security policy, supported versions and
+the private reporting link. Report vulnerabilities through GitHub's private
+advisory form, not a public issue. The marketplace security baseline and this
+README are limited evidence for one commit, not a security audit.
 
 ## License
 
