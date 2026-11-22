@@ -43,10 +43,14 @@ PanelWindow {
   property real scrimOpacity: 0.80
   property real nodeOpacity: 0.90
 
-  readonly property int nodeWidth: 248
+  readonly property int nodeWidth: 300
   readonly property int headerHeight: 30
   readonly property int portTop: 38
   readonly property int portStep: 22
+  // Each side gets half the box, so an input label and an output label on the
+  // same row can never meet in the middle.
+  readonly property int portLabelWidth: Math.floor(nodeWidth / 2) - 22
+  readonly property int nodeGap: 10
 
   property var nodes: []
   property var pendingFrom: null
@@ -118,9 +122,9 @@ PanelWindow {
       })
     }
 
-    var columnX = [48, 372, 696]
+    var columnX = [48, 396, 744]
     var placed = []
-    var maxX = 1040, maxY = 760
+    var maxX = 1100, maxY = 760
     for (var c = 0; c < columns.length; c++) {
       var column = columns[c]
       var nextY = 56
@@ -136,6 +140,13 @@ PanelWindow {
         maxY = Math.max(maxY, item.y + nodeHeight(item) + 40)
         placed.push(item)
       }
+    }
+    separate(placed)
+    maxX = 1100
+    maxY = 760
+    for (var p = 0; p < placed.length; p++) {
+      maxX = Math.max(maxX, placed[p].x + win.nodeWidth + 40)
+      maxY = Math.max(maxY, placed[p].y + win.nodeHeight(placed[p]) + 40)
     }
     win.graphWidth = maxX
     win.graphHeight = maxY
@@ -198,6 +209,46 @@ PanelWindow {
     return win.portTop + rows * win.portStep + 12
   }
 
+  function rectFor(node, x, y) {
+    return { x: x, y: y, w: win.nodeWidth, h: win.nodeHeight(node) }
+  }
+
+  function rectsOverlap(a, b, gap) {
+    var g = gap === undefined ? win.nodeGap : gap
+    return a.x < b.x + b.w + g && a.x + a.w + g > b.x
+      && a.y < b.y + b.h + g && a.y + a.h + g > b.y
+  }
+
+  // A node may not be dropped on top of another one. The drag keeps its last
+  // free position when the pointer would overlap.
+  function canPlace(node, x, y) {
+    var candidate = rectFor(node, x, y)
+    for (var i = 0; i < win.nodes.length; i++) {
+      var other = win.nodes[i]
+      if (other === node) continue
+      if (rectsOverlap(candidate, rectFor(other, other.x, other.y))) return false
+    }
+    return true
+  }
+
+  // Initial placement and refreshes can make boxes grow (more ports) or land
+  // where a user dragged another box. Push the lower box down until every box
+  // is fully readable; a box is never left under another.
+  function separate(nodes) {
+    for (var pass = 0; pass < 8; pass++) {
+      var changed = false
+      for (var i = 0; i < nodes.length; i++) {
+        for (var j = i + 1; j < nodes.length; j++) {
+          var a = nodes[i], b = nodes[j]
+          if (!rectsOverlap(rectFor(a, a.x, a.y), rectFor(b, b.x, b.y))) continue
+          if (a.y <= b.y) { b.y = a.y + win.nodeHeight(a) + win.nodeGap; changed = true }
+          else { a.y = b.y + win.nodeHeight(b) + win.nodeGap; changed = true }
+        }
+      }
+      if (!changed) break
+    }
+  }
+
   function portPos(node, direction, index) {
     var ports = direction === "out" ? node.outputs : node.inputs
     if (!node || index < 0 || index >= ports.length) return null
@@ -224,6 +275,18 @@ PanelWindow {
         if (p && Math.abs(p.x - x) <= 12 && Math.abs(p.y - y) <= 12)
           return { node: n, port: list[j], pos: p }
       }
+    }
+    return null
+  }
+
+  // The remove control in a virtual node's header. Kept in the same JS
+  // geometry as every other hit test so the one canvas MouseArea can find it.
+  function virtualDeleteAt(x, y) {
+    for (var i = 0; i < win.nodes.length; i++) {
+      var n = win.nodes[i]
+      if (n.kind !== "virtual") continue
+      if (Math.abs(x - (n.x + win.nodeWidth - 16)) <= 11
+          && Math.abs(y - (n.y + 16)) <= 11) return n
     }
     return null
   }
@@ -274,6 +337,23 @@ PanelWindow {
       flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + dy))
     }
 
+    // Keep the chrome readable over a bright window or wallpaper while the
+    // canvas itself stays translucent.
+    Rectangle {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      height: 58
+      color: Util.alpha(Commons.Color.background, 0.5)
+    }
+    Rectangle {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: 46
+      color: Util.alpha(Commons.Color.background, 0.5)
+    }
+
     // Swallow clicks that land on the chrome so the scrim does not close.
     MouseArea {
       anchors.left: parent.left
@@ -284,31 +364,7 @@ PanelWindow {
     }
 
     Row {
-      anchors.left: parent.left
-      anchors.top: parent.top
-      anchors.margins: 14
-      spacing: 12
-
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
-        text: "PipeRoute · " + strings.t("graph.title")
-        color: win.onScrim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
-        text: win.statusText + (win.errorText ? "  ·  " + win.errorText : "")
-        color: win.errorText ? win.errorColor : win.onScrimDim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-      }
-    }
-
-    Row {
+      id: toolbar
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.margins: 12
@@ -320,11 +376,44 @@ PanelWindow {
       Button { iconText: "󰅙"; tooltipText: strings.t("action.close"); onClicked: win.closeRequested() }
     }
 
+    Row {
+      id: headerText
+      anchors.left: parent.left
+      anchors.right: toolbar.left
+      anchors.top: parent.top
+      anchors.margins: 14
+      anchors.rightMargin: 12
+      spacing: 12
+
+      Text {
+        id: titleText
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: "PipeRoute · " + strings.t("graph.title")
+        color: win.onScrim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.max(0, headerText.width - titleText.width - headerText.spacing)
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        text: win.statusText + (win.errorText ? "  ·  " + win.errorText : "")
+        color: win.errorText ? win.errorColor : win.onScrimDim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+    }
+
     Text {
       anchors.left: parent.left
       anchors.bottom: parent.bottom
       anchors.margins: 14
+      width: parent.width - 28
       textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
       text: win.hoverText !== "" ? win.hoverText : strings.t("graph.hint")
       color: win.onScrimDim
       font.family: Style.font.family
@@ -335,7 +424,7 @@ PanelWindow {
       id: flick
       anchors.fill: parent
       anchors.topMargin: 58
-      anchors.bottomMargin: 46
+      anchors.bottomMargin: 58
       clip: true
       contentWidth: Math.max(width, win.graphWidth)
       contentHeight: Math.max(height, win.graphHeight)
@@ -378,7 +467,7 @@ PanelWindow {
             required property var modelData
             x: modelData.x
             y: modelData.y
-            z: 2
+            z: win.dragNode === modelData ? 10 : 2
             width: win.nodeWidth
             height: win.nodeHeight(modelData)
             radius: 10
@@ -388,7 +477,9 @@ PanelWindow {
               ? Util.alpha(Commons.Color.accent, 0.55)
               : modelData.kind === "virtual"
                 ? Util.alpha(Commons.Color.accent, 0.8)
-                : win.boxBorder
+                : modelData.kind === "midi"
+                  ? Util.alpha(Commons.Color.accent, 0.35)
+                  : win.boxBorder
             border.width: 1
 
             Text {
@@ -396,14 +487,38 @@ PanelWindow {
               anchors.right: parent.right
               anchors.top: parent.top
               anchors.margins: 8
+              anchors.rightMargin: modelData.kind === "virtual" ? 30 : 8
               height: win.headerHeight - 10
               textFormat: Text.PlainText
               elide: Text.ElideRight
-              text: (modelData.kind === "stream" ? "󱀞 " : modelData.kind === "virtual" ? "󰌘 " : "󰓃 ") + modelData.label
+              text: (modelData.kind === "stream" ? "󱀞 " : modelData.kind === "virtual" ? "󰌘 " : modelData.kind === "midi" ? "󰝚 " : "󰓃 ") + modelData.label
               color: win.onScrim
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               font.bold: true
+            }
+
+            // Virtual devices are the only nodes this plugin owns; offer the
+            // remove control right on the box instead of hiding it in a menu.
+            Rectangle {
+              visible: modelData.kind === "virtual"
+              x: win.nodeWidth - 24
+              y: 8
+              width: 16
+              height: 16
+              radius: 8
+              color: "transparent"
+              border.color: Util.alpha(win.cable, 0.8)
+              border.width: 1
+
+              Text {
+                anchors.centerIn: parent
+                textFormat: Text.PlainText
+                text: "×"
+                color: win.onScrim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
             }
 
             Repeater {
@@ -423,9 +538,9 @@ PanelWindow {
                   x: -12
                 }
                 Text {
-                  width: win.nodeWidth - 34
+                  width: win.portLabelWidth
                   textFormat: Text.PlainText
-                  elide: Text.ElideRight
+                  elide: Text.ElideMiddle
                   text: modelData.label
                   color: win.onScrimDim
                   font.family: Style.font.family
@@ -441,9 +556,9 @@ PanelWindow {
                 required property int index
                 anchors.right: parent.right
                 anchors.rightMargin: 12
-                width: win.nodeWidth - 28
+                width: win.portLabelWidth
                 horizontalAlignment: Text.AlignRight
-                elide: Text.ElideLeft
+                elide: Text.ElideMiddle
                 y: win.portTop + index * win.portStep
                 textFormat: Text.PlainText
                 text: modelData.label + " 󰁧"
@@ -528,6 +643,13 @@ PanelWindow {
 
           onPressed: mouse => {
             if (mouse.button !== Qt.LeftButton) return
+            // 0. virtual node remove control
+            var virtualNode = win.virtualDeleteAt(mouse.x, mouse.y)
+            if (virtualNode) {
+              win.actionRequested("destroy", [virtualNode.id])
+              mouse.accepted = true
+              return
+            }
             // 1. cable midpoint -> remove
             var links = win.graph.links || []
             for (var i = 0; i < links.length; i++) {
@@ -575,11 +697,16 @@ PanelWindow {
               win.pendingTo = { x: mouse.x, y: mouse.y }
               win.drawPending()
             } else if (win.dragMode === "node" && win.dragNode) {
-              win.dragNode.x = Math.max(8, Math.min(win.graphWidth - win.nodeWidth - 8,
+              var nx = Math.max(8, Math.min(win.graphWidth - win.nodeWidth - 8,
                 mouse.x - win.dragOffsetX))
-              win.dragNode.y = Math.max(8, Math.min(win.graphHeight - win.nodeHeight(win.dragNode) - 8,
+              var ny = Math.max(8, Math.min(win.graphHeight - win.nodeHeight(win.dragNode) - 8,
                 mouse.y - win.dragOffsetY))
-              win.refreshNodes()
+              // Keep the last free spot when the pointer would cover a peer.
+              if (win.canPlace(win.dragNode, nx, ny)) {
+                win.dragNode.x = nx
+                win.dragNode.y = ny
+                win.refreshNodes()
+              }
             } else if (win.dragMode === "pan") {
               var scene = world.mapToItem(null, mouse.x, mouse.y)
               flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width,
@@ -587,6 +714,11 @@ PanelWindow {
               flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height,
                 win.panContentY - (scene.y - win.panStartY)))
             } else {
+              var removable = win.virtualDeleteAt(mouse.x, mouse.y)
+              if (removable) {
+                win.hoverText = strings.t("action.destroy") + " · " + removable.label
+                return
+              }
               var p = win.portAt(mouse.x, mouse.y, "out") || win.portAt(mouse.x, mouse.y, "in")
               win.hoverText = p ? p.node.label + " · " + p.port.label : ""
             }

@@ -87,8 +87,19 @@ BarWidget {
       strings.t("status.streams").arg(streams)
   }
 
+  // A read is often in flight when the user clicks. Never drop the click:
+  // keep the newest user action and start it as soon as the current run ends.
+  property var queuedAction: null
+
   function runCtl(action, args) {
-    if (ctl.running) return
+    if (ctl.running) {
+      if (action !== "graph") queuedAction = { action: action, args: args }
+      return
+    }
+    startCtl(action, args)
+  }
+
+  function startCtl(action, args) {
     pendingAction = action
     if (action === "graph") root.lastGraphRefreshMs = Date.now()
     statusText = strings.t("busy")
@@ -143,29 +154,37 @@ BarWidget {
 
   function finish(result) {
     var action = pendingAction
+    var next = queuedAction
+    queuedAction = null
+
     if (result.state !== "ok") {
       var detail = String(result.reason || result.stdout || "").slice(0, 200)
       errorText = result.state + (detail ? ": " + detail : "")
       statusText = strings.t("ready")
-      return
-    }
-    if (action === "graph") {
+    } else if (action === "graph") {
       root.lastGraphRefreshMs = Date.now()
       takeGraph(String(result.stdout || ""))
       // takeGraph leaves errorText set when the payload was unusable.
       if (errorText === "") statusText = strings.t("ready")
-      return
-    }
-    if (action === "create-node") {
-      var parts = String(result.stdout || "").trim().split(/\s+/)
-      statusText = parts.length >= 3
-        ? strings.t("created").arg(parts[2]) : strings.t("createdGeneric")
     } else {
-      statusText = strings.t("ready")
+      if (action === "create-node") {
+        var parts = String(result.stdout || "").trim().split(/\s+/)
+        statusText = parts.length >= 3
+          ? strings.t("created").arg(parts[2]) : strings.t("createdGeneric")
+      } else {
+        statusText = strings.t("ready")
+      }
+      errorText = ""
+      // Re-read immediately for a topology change so the canvas shows the
+      // new or removed virtual device at once. If another action is queued,
+      // let it finish first; its own branch refreshes after that.
+      if (!next && (root.popupOpen || root.graphOpen)) {
+        if (action === "create-node" || action === "destroy") root.refreshGraph()
+        else root.scheduleGraphRefresh()
+      }
     }
-    errorText = ""
-    // Re-read so the managed list and canvas show the new topology at once.
-    if (root.popupOpen || root.graphOpen) scheduleGraphRefresh()
+
+    if (next) startCtl(next.action, next.args)
   }
 
   function setDefaultSink(row) {

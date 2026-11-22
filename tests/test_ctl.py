@@ -38,6 +38,8 @@ dump = [
         "node.name": "Brave", "media.class": "Stream/Output/Audio"}}},
     {"id": 12, "type": "PipeWire:Interface:Node", "info": {"props": {
         "node.name": "Midi-Bridge", "media.class": "Midi/Sink"}}},
+    {"id": 14, "type": "PipeWire:Interface:Node", "info": {"props": {
+        "node.name": "webcam", "media.class": "Video/Source"}}},
     {"id": 20, "type": "PipeWire:Interface:Port", "info": {"props": {
         "node.id": 10, "port.name": "playback_FL", "port.direction": "in"}}},
     {"id": 21, "type": "PipeWire:Interface:Port", "info": {"props": {
@@ -46,13 +48,18 @@ dump = [
         "node.id": 11, "port.name": "output_FL", "port.direction": "out"}}},
     {"id": 23, "type": "PipeWire:Interface:Port", "info": {"props": {
         "node.id": 12, "port.name": "Port-0", "port.direction": "out"}}},
+    {"id": 25, "type": "PipeWire:Interface:Port", "info": {"props": {
+        "node.id": 14, "port.name": "capture_1", "port.direction": "out"}}},
     {"id": 30, "type": "PipeWire:Interface:Link", "info": {"props": {
         "link.output.port": 22, "link.input.port": 20}}},
 ]
 graph = ctl.build_graph(dump)
 by_name = {n["name"]: n for n in graph["nodes"]}
-assert set(by_name) == {"alsa_output.usb-UMC", "Brave"}, by_name.keys()
+assert set(by_name) == {"alsa_output.usb-UMC", "Brave", "Midi-Bridge"}, by_name.keys()
+assert "webcam" not in by_name, "video nodes stay out of the patchbay"
 assert by_name["Brave"]["kind"] == "stream"
+assert by_name["Midi-Bridge"]["kind"] == "midi"
+assert by_name["Midi-Bridge"]["outputs"][0]["name"] == "Midi-Bridge:Port-0"
 assert by_name["alsa_output.usb-UMC"]["label"] == "UMC 404HD"
 assert by_name["Brave"]["outputs"][0]["name"] == "Brave:output_FL"
 assert by_name["alsa_output.usb-UMC"]["inputs"][0]["name"] == "alsa_output.usb-UMC:playback_FL"

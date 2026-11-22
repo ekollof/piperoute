@@ -25,6 +25,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 
 PW_LINK = "/usr/bin/pw-link"
 PW_CLI = "/usr/bin/pw-cli"
@@ -131,6 +132,7 @@ def build_graph(objects):
                 "label": safe_text(desc)[:100] or name or ("node " + str(oid)),
                 "class": media_class,
                 "kind": ("virtual" if MANAGED_RE.match(name)
+                         else "midi" if "Midi" in media_class
                          else "stream" if media_class.startswith("Stream/")
                          else "device" if media_class else "other"),
                 "outputs": [],
@@ -182,11 +184,11 @@ def build_graph(objects):
         if len(links) >= MAX_LINKS:
             break
 
-    # Only audio nodes with at least one port are interesting to a patchbay;
-    # MIDI bridges and v4l2 devices would otherwise crowd the canvas.
+    # Audio and MIDI nodes are what this patchbay routes; v4l2/video nodes
+    # would only crowd the canvas.
     nodes = []
     for node in node_map.values():
-        if "Audio" not in node["class"]:
+        if "Audio" not in node["class"] and "Midi" not in node["class"]:
             continue
         for port in ports_by_node.get(node["id"], []):
             if port["direction"] == "in" and len(node["inputs"]) < MAX_PORTS_PER_KIND:
@@ -249,13 +251,36 @@ def cmd_create_node(args):
     ok, reason, _ = run([PW_CLI, "create-node", "adapter", props])
     if not ok:
         return fail(reason)
-    objects, _ = dump_json()
-    if objects:
-        for obj in objects:
-            props2 = (obj.get("info") or {}).get("props") or {}
-            if str(props2.get("node.name") or "") == name:
-                print("ok %s %s" % (obj.get("id", "?"), name))
-                return 0
+
+    # A fresh node shows up in pw-dump before its ports do. Returning at that
+    # moment makes the canvas draw nothing (nodes without ports are skipped),
+    # so wait briefly until the node has at least one port. Bounded, because
+    # the Run block has a hard deadline.
+    deadline = time.time() + 2.0
+    found = ""
+    while True:
+        objects, _ = dump_json()
+        if objects:
+            for obj in objects:
+                props2 = (obj.get("info") or {}).get("props") or {}
+                if str(props2.get("node.name") or "") != name:
+                    continue
+                node_id = str(obj.get("id", "?"))
+                found = node_id
+                has_port = any(
+                    candidate.get("type") == "PipeWire:Interface:Port"
+                    and str(((candidate.get("info") or {}).get("props") or {}).get("node.id", "")) == node_id
+                    for candidate in objects
+                )
+                if has_port:
+                    print("ok %s %s" % (node_id, name))
+                    return 0
+        if time.time() >= deadline:
+            break
+        time.sleep(0.1)
+    if found:
+        print("ok %s %s" % (found, name))
+        return 0
     return fail("node created but not found in graph")
 
 

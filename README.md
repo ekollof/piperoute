@@ -26,7 +26,7 @@ for defaults, stream routing and virtual devices.
 
 A full-screen canvas on the monitor you clicked, with:
 
-- **Nodes** — one box per audio node, laid out left-to-right by signal flow:
+- **Nodes** — one box per audio or MIDI node, laid out left-to-right by signal flow:
   outputs-only nodes (playback streams, source devices) on the left, nodes with
   both inputs and outputs (sinks with monitors, virtual devices) in the middle,
   and inputs-only nodes (capture streams) on the right. Each box lists its input
@@ -48,8 +48,8 @@ A full-screen canvas on the monitor you clicked, with:
   one read), plus a 5-second safety poll for changes that model doesn't signal
   (such as a null sink created by another client).
 
-Only audio nodes are shown; MIDI bridges and webcam video nodes stay out of
-the way.
+Audio and MIDI nodes are shown; webcam/video nodes stay out of the way. The
+compact menu still handles audio devices and streams only.
 
 ### Compact menu (right click)
 

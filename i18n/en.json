@@ -1,7 +1,7 @@
 {
   "title": "PipeRoute · routing",
   "graph.title": "patchbay",
-  "graph.hint": "Drag an output port (right side of a box) onto an input port (left side) to patch them. Drag a title bar to move a node; drag empty canvas or use the arrow keys to pan. Click × on a cable to remove it. R refreshes, Esc closes.",
+  "graph.hint": "Drag an output port (right side of a box) onto an input port (left side) to patch them. Drag a title bar to move a node; drag empty canvas or use the arrow keys to pan. Click × on a cable to remove it, or × in a virtual device's header to delete that device. R refreshes, Esc closes.",
   "status.connecting": "Connecting to PipeWire…",
   "status.none": "none",
   "status.output": "Out: %1",

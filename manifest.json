@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.piperoute",
   "name": "PipeRoute",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "author": "Emiel Kollof",
   "license": "MIT",
-  "description": "Graphical PipeWire patchbay: drag cables between ports on a node canvas, create virtual sinks/sources, and route streams, straight from the running graph.",
+  "description": "Graphical PipeWire patchbay: drag cables between audio and MIDI ports, create virtual sinks/sources, and route streams, straight from the running graph.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "PipeRoute",
-    "description": "Patch ports, create virtual devices, and route audio streams in PipeWire",
+    "description": "Patch audio and MIDI ports, create virtual devices, and route streams in PipeWire",
     "category": "Audio",
     "allowMultiple": false,
     "defaultSection": "right",
