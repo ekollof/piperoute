@@ -63,6 +63,9 @@ helper. It:
   a closed environment, a hard deadline and byte/line caps;
 - invokes only the installed PipeWire tools `pw-dump`, `pw-link`, `pw-cli`,
   `wpctl` and `pactl`, also with argv;
+- creates links from the exact PipeWire port ids selected on the canvas, never
+  by textual port name, so two clients exposing identical names cannot be
+  confused;
 - never uses a shell, downloads or executes remote code, opens a socket, or
   makes a network request;
 - keeps no settings, cache or credential files;

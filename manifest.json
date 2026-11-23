@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.piperoute",
   "name": "PipeRoute",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "author": "Emiel Kollof",
   "license": "MIT",
   "description": "Graphical PipeWire patchbay: drag cables between audio and MIDI ports, create virtual sinks/sources, and route streams, straight from the running graph.",

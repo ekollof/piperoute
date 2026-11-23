@@ -36,7 +36,8 @@ A full-screen canvas on the monitor you clicked, with:
   in PipeWire. They follow the nodes when you move them.
 - **Drag an output port onto an input port** to create a link. A dashed cable
   follows the cursor while you drag, and the bottom edge names the port under
-  the cursor.
+  the cursor. The link is created from the exact PipeWire port ids, so another
+  client with identical port names is never selected by mistake.
 - **Drag a node by its title bar** to rearrange the canvas.
 - **Pan** by dragging empty canvas, by scrolling (Shift for horizontal), or
   with the arrow keys.

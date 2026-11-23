@@ -738,7 +738,7 @@ PanelWindow {
                     break
                   }
                 }
-                if (source && !exists) win.actionRequested("connect", [source.port.name, input.port.name])
+                if (source && !exists) win.actionRequested("connect", [source.port.id, input.port.id])
               }
               win.pendingFrom = null
               win.pendingTo = null

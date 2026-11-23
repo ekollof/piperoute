@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 """Pure tests for the control helper: no live routing is changed."""
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 
@@ -20,9 +22,6 @@ assert ctl.ENDPOINT_RE.match("alsa_output.usb-UMC-00.pro-output-0")
 assert not ctl.ENDPOINT_RE.match("sink;rm -rf /")
 assert ctl.MANAGED_RE.match("pr_test_a1b2")
 assert not ctl.MANAGED_RE.match("alsa_output.usb-UMC")
-assert ctl.PORT_RE.match("UMC 192k: capture_AUX0")
-assert not ctl.PORT_RE.match("port\nwpctl set-default 1")
-assert not ctl.PORT_RE.match("$(whoami)")
 assert len(ctl.safe_text("A" * 500)) <= 240
 assert "<" not in ctl.safe_text("<script>alert(1)</script>")
 assert "&" not in ctl.safe_text("a & b")
@@ -84,6 +83,26 @@ assert by_name["Brave"]["outputs"][0]["name"] == "Brave:output_FL"
 assert by_name["alsa_output.usb-UMC"]["inputs"][0]["name"] == "alsa_output.usb-UMC:playback_FL"
 assert graph["links"] == [{"id": "30", "out": "22", "in": "20"}]
 assert graph["managed"] == []
+assert ctl.port_by_id(dump, "20")["port.direction"] == "in"
+assert ctl.port_by_id(dump, "22")["port.direction"] == "out"
+assert ctl.port_by_id(dump, "999") is None
+
+# Connecting addresses the exact port ids from the canvas, never textual
+# names. Two clients may expose identical names; the id still selects one.
+original_dump = ctl.dump_json
+original_run = ctl.run
+calls = []
+ctl.dump_json = lambda: (dump, "")
+ctl.run = lambda argv: (calls.append(argv) or (True, "", ""))
+assert ctl.cmd_connect(["22", "20"]) == 0
+assert calls[-1] == [ctl.PW_LINK, "22", "20"]
+with contextlib.redirect_stdout(io.StringIO()):
+    assert ctl.cmd_connect(["20", "22"]) == 1, "input-to-input is refused"
+    assert ctl.cmd_connect(["999", "20"]) == 1, "unknown port is refused"
+    assert ctl.cmd_connect(["Brave:output_FL", "alsa_output:playback_FL"]) == 1, "names are refused"
+assert len(calls) == 1, "only the valid pair reached pw-link"
+ctl.dump_json = original_dump
+ctl.run = original_run
 
 # A node this plugin created is reported as managed and tagged as virtual.
 dump.append({"id": 13, "type": "PipeWire:Interface:Node", "info": {"props": {
